@@ -13,6 +13,7 @@ class GitlabConnector:
         self.project_object = self.gl.projects.get(self.project_id)
         print('==================================================================')
         print('[INFO] Project id is: ' + str(project_id) + ' path is: ' + self.project_object.path_with_namespace)
+        self.event_counter = 0
         # -- dicts for fast ref
         # input - issue iid, provides various info
         self.issue_iid_dict = {}
@@ -20,11 +21,31 @@ class GitlabConnector:
         self.mr_iid_dict = {}
         # input - commit hash, out - case id
         self.commit_case_dict = {}
+        # input - user (gitlab id or email), out - user ref
+        self.user_ref = {}
         # --- lists for entity data dumping
         self.issue_list = []
         self.mr_list = []
         self.pl_list = []
         self.ext_issue_regex = re.compile(ext_issue_ref_regex)
+        self.event_logs = []
+
+    def add_event(self, event_id, action, time, case, user, user_ref, info1: str = '', info2: str = ''):
+        fields_ok = True
+        # carry out None checks
+        for i in event_id, action, time, case, user, user_ref:
+            if i is None:
+                fields_ok = False
+        if fields_ok:
+            # TODO: enable data privacy setting to encrypt these info. email as key should be hashed when passed,
+            #  this function will only hash user_ref
+            # adding to dump later as a user reference from all events
+            self.user_ref[str(user)] = str(user_ref)
+            self.event_logs.append({'id': str(event_id), 'action': str(action),
+                                    'time': str(time), 'case': str(case),
+                                    'user': str(user), 'info1': info1, 'info2': info2})
+
+            self.event_counter += 1
 
     def get_all_events(self, prod_run: bool = False) -> list[dict]:
         event_logs = []
@@ -58,7 +79,7 @@ class GitlabConnector:
         return prefix + '-' + str(self.project_id) + '-' + str(value)
 
     def get_pipeline_events(self, prod_run: bool = False) -> list[dict]:
-        event_logs = []
+        self.event_logs = []
         project = self.project_object
         pipelines = project.pipelines.list(get_all=prod_run)
         print('[INFO] number of pipelines found for project: ' + str(len(pipelines)))
@@ -72,16 +93,13 @@ class GitlabConnector:
                     case_id = self.commit_case_dict[pl.sha]
                 else:
                     print('[WARN] unable to find issue for pipeline: ' + str(pl.id))
-                    case_id = self.generate_case_id(pl.iid, 'pipeline')
+                    # pl.iid can be null, hence avoid using it for PL altogether
+                    case_id = self.generate_case_id(pl.id, 'pipeline')
                 # TODO: create the PL list
                 # pipeline created event
-                created_event = {'id': str(pl.id), 'title': '', 'action': 'gl_PL_created', 'user': str(pl.user['id']),
-                                 'time': pl.created_at, 'case': case_id}
-                event_logs.append(created_event)
-                # pipeline completed event
-                completed_event = {'id': str(pl.id), 'title': '', 'action': 'gl_PL_completed', 'user': str(pl.user['id']),
-                                   'time': pl.finished_at, 'case': case_id}
-                event_logs.append(completed_event)
+                self.add_event(pl.id, 'gl_PL_created',  pl.created_at, case_id, pl.user['id'], pl.user['name'])
+                # pipeline completed event - only adds if finished_at is not none
+                self.add_event(pl.id, 'gl_PL_completed', pl.finished_at, case_id, pl.user['id'], pl.user['name'])
                 # get pipeline jobs
                 jobs = pl.jobs.list(get_all=prod_run)
                 print('[DEBUG] jobs found for pipeline: ' + str(len(jobs)))
@@ -90,18 +108,18 @@ class GitlabConnector:
                 for job in jobs:
                     if job.status in ['started', 'failed', 'success']:
                         # add job event
-                        created_event = {'id': str(job.id), 'title': '', 'action': 'gl_job_started', 'user': str(job.user['id']),
-                                         'time': pl.started_at, 'case': case_id}
-                        event_logs.append(created_event)
+                        # job started at time could be None - as created jobs may not have run
+                        self.add_event(job.id, 'gl_job_started', job.started_at, case_id, job.user['id'],
+                                       job.user['name'], str(job.name), str(job.stage))
             except (TypeError, KeyError):
                 print('[ERROR] Error occurred retrieving data for: ' + str(pipeline.id) + ' moving to next.')
                 traceback.print_exc()
-        print('[INFO] number of pipeline related events found: ' + str(len(event_logs)))
-        return event_logs
+        print('[INFO] number of pipeline related events found: ' + str(len(self.event_logs)))
+        return self.event_logs
 
     def get_mrs_events(self, prod_run: bool = False) -> list[dict]:
         print('[INFO] scanning MRs in project_id: ' + str(self.project_id))
-        event_logs = []
+        self.event_logs = []
         project = self.project_object
         merge_requests = project.mergerequests.list(get_all=prod_run)
         print('[INFO] number of MRs found for project: ' + str(len(merge_requests)))
@@ -115,23 +133,16 @@ class GitlabConnector:
                     case_id = self.generate_case_id(mr.iid, 'mr')
                 # create event log for create MR event
                 # TODO: use a map to get the user email later
-                created_event = {'id': str(mr.id), 'title': '', 'action': 'gl_MR_created', 'user': str(mr.author['id']),
-                                 'time': mr.created_at, 'case': case_id}
-                event_logs.append(created_event)
+                self.add_event(mr.id, 'gl_MR_created', mr.created_at, case_id, mr.author['id'], mr.author['name'])
                 if mr.merged_at is not None:
                     # adding merged event
-                    # it was observed that sometimes merge user id could be null - skip them
+                    # it was observed that sometimes merge user id not defined - skip them
                     if 'id' in mr.merge_user:
-                        merged_event = {'id': str(mr.id), 'title': '', 'action': 'gl_MR_merged',
-                                        'user': str(mr.merge_user['id']),
-                                        'time': mr.merged_at, 'case': case_id}
-                        event_logs.append(merged_event)
-                if mr.closed_at is not None:
-                    # adding closed event
-                    closed_event = {'id': str(mr.id), 'title': '', 'action': 'gl_MR_closed',
-                                    'user': str(mr.closed_by['id']),
-                                    'time': mr.closed_at, 'case': case_id}
-                    event_logs.append(closed_event)
+                        self.add_event(mr.id, 'gl_MR_merged', mr.merged_at,
+                                       case_id, mr.merge_user['id'], mr.merge_user['name'])
+                # add closing event, if mr.closed_at is not None
+                self.add_event(mr.id, 'gl_MR_closed', mr.closed_at,
+                               case_id, mr.closed_by['id'], mr.closed_by['name'])
                 # primary commit should be added to pipeline dict, replace but give a warning
                 if mr.sha in self.commit_case_dict:
                     print('[WARN] setting ' + str(mr.iid) + ' as MR for ' + mr.sha + ' previous linked MR was '
@@ -149,10 +160,8 @@ class GitlabConnector:
                 print('[DEBUG] commits found related to MR: ' + str(len(commits)))
                 for commit in commits:
                     # NOTE: commit do not provide gitlab user id, but provides email
-                    commit_event = {'id': str(commit.id), 'title': '', 'action': 'gl_commit',
-                                    'user': commit.author_email,
-                                    'time': commit.created_at, 'case': case_id}
-                    event_logs.append(commit_event)
+                    self.add_event(commit.id, 'gl_commit', commit.created_at,
+                                   case_id, commit.author_email, commit.author_name)
                     # merge pipelines could be launched from any commit related to MR
                     # but do not overwrite
                     if commit.id not in self.commit_case_dict:
@@ -171,13 +180,13 @@ class GitlabConnector:
             except (TypeError, KeyError):
                 print('[ERROR] Error occurred retrieving data for: ' + str(mr.iid) + ' moving to next.')
                 traceback.print_exc()
-        print('[INFO] number of MR related events found: ' + str(len(event_logs)))
-        return event_logs
+        print('[INFO] number of MR related events found: ' + str(len(self.event_logs)))
+        return self.event_logs
 
     def get_issues_events(self, prod_run: bool = False) -> list[dict]:
         print('[INFO] scanning issues in project_id: ' + str(self.project_id))
         # --initialising values---
-        event_logs = []
+        self.event_logs = []
         branch_create_regex = re.compile('created branch')
         assigned_regex = re.compile('assigned to')
         mr_regex = re.compile('mentioned in merge request')
@@ -201,18 +210,16 @@ class GitlabConnector:
                     # check whether there's assigned note
                     if re.search(assigned_regex, note.body) is not None:
                         # add assigned event
-                        assigned_event = {'id': str(note.id), 'title': note.body, 'action': 'gl_issue_assigned',
-                                          'user': str(note.author['id']), 'time': note.created_at, 'case': case_id}
-                        event_logs.append(assigned_event)
+                        self.add_event(note.id, 'gl_issue_assigned',
+                                       note.created_at, case_id, note.author['id'], note.author['name'], note.body)
                     # check whether there's branch creation
                     if re.search(branch_create_regex, note.body) is not None:
                         # get branch name as string
                         issue_branch = note.body.split('`')[1]
                         self.issue_iid_dict[issue.iid]['branches'].append(issue_branch)
                         # add branch create event
-                        branch_event = {'id': str(note.id), 'title': '', 'action': 'gl_branch_created',
-                                        'user': str(note.author['id']), 'time': note.created_at, 'case': case_id}
-                        event_logs.append(branch_event)
+                        self.add_event(note.id, 'gl_branch_created',
+                                       note.created_at, case_id, note.author['id'], note.author['name'], issue_branch)
                     # identify any merge requests linked
                     if re.search(mr_regex, note.body) is not None:
                         # get MR iid and add as int
@@ -226,15 +233,11 @@ class GitlabConnector:
 
                 # create event log for create issue event
                 # TODO: use user email to map. for now, use gitlab id or email as available
-                created_event = {'id': str(issue.id), 'title': '', 'action': 'gl_issue_created', 'user': str(issue.author['id']),
-                                 'time': issue.created_at, 'case': case_id}
-                event_logs.append(created_event)
-                if issue.closed_at is not None:
-                    # adding closed event
-                    closed_event = {'id': str(issue.id), 'title': '', 'action': 'gl_issue_closed',
-                                    'user': str(issue.author['id']),
-                                    'time': issue.closed_at, 'case': case_id}
-                    event_logs.append(closed_event)
+                self.add_event(issue.id, 'gl_issue_created',
+                               issue.created_at, case_id, issue.author['id'], issue.author['name'])
+                # closed event - if issue.closed_at is not None
+                self.add_event(issue.id, 'gl_issue_closed', issue.closed_at, case_id,
+                               issue.closed_by['id'], issue.closed_by['name'])
                 # Try to find an external issue id. description can be null
                 if issue.description is not None:
                     ext_issue_id = self.find_ext_issue_id(issue.title + ' ' + issue.description)
@@ -249,8 +252,8 @@ class GitlabConnector:
             except (TypeError, KeyError):
                 print('[ERROR] Error occurred retrieving data for: ' + str(issue.iid) + ' moving to next.')
                 traceback.print_exc()
-        print('[INFO] number of issue related events found: ' + str(len(event_logs)))
-        return event_logs
+        print('[INFO] number of issue related events found: ' + str(len(self.event_logs)))
+        return self.event_logs
 
     # def get_issue_events(self, issue_object: ProjectIssue):
     #     state_events_list = issue_object.resourcestateevents.list(target_type='merge_request')
