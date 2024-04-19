@@ -72,10 +72,8 @@ if __name__ == '__main__':
         print('[INFO] Events found so far ' + str(len(event_logs)) + ', issues completed: ' + str(issue_count))
     # create df
     event_df = pd.DataFrame(event_logs)
-    # converting to standard pm4py column names
-    # use pm4py.convert_to_event_log without modifications to convert this to an event log object
-    event_df = event_df.rename(columns={'case': 'case:concept:name', 'time': 'time:timestamp',
-                                        'action': 'concept:name'})
+    # use pm4py.format_dataframe and then pm4py.convert_to_event_log to convert this to an event log
+    # please use utils/process_mining.py for this task
     print('======== Event log data: ===========')
     print(event_df.info())
     # if getting errors here, install pyarrow
