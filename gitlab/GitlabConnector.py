@@ -3,6 +3,7 @@ import gitlab
 import re
 import traceback
 import datetime
+from typing import Literal
 
 
 class GitlabConnector:
@@ -66,10 +67,11 @@ class GitlabConnector:
             link_type = 'undefined'
         return case_id, link_type
 
-    def find_case_id_for_pl(self, pl_sha: str, pl_id: int) -> tuple[str, str]:
+    def find_case_id_for_pl(self, pl_sha: str, pl_id: int) -> tuple[str, str, str]:
         pre_merge = self.commit_mr_pre_merge_dict
         post_merge = self.commit_mr_post_merge_dict
         commit_list = self.commit_mr_commits_dict
+        mr_iid = ''
         if (pl_sha in pre_merge) and len(pre_merge[pl_sha]) > 0:
             mr_iid = self.get_max_timed_id(pre_merge[pl_sha], self.mr_created_dict)
             case_id = self.mr_case_id[mr_iid]
@@ -86,7 +88,7 @@ class GitlabConnector:
             case_id = self.generate_case_id(pl_id, 'pipeline')
             link_type = 'undefined'
             print('[WARN] did not find a relation to an MR for pipeline: ' + str(pl_id))
-        return case_id, link_type
+        return case_id, link_type, str(mr_iid)
 
     def add_event(self, event_id, action, time, case, user, user_ref, local_case, info1: str = '', info2: str = ''):
         fields_ok = True
@@ -125,7 +127,7 @@ class GitlabConnector:
             print('[DEBUG] found reference to external issue id: ' + match)
             return match
 
-    def generate_case_id(self, value, prefix_type: str = 'issue') -> str:
+    def generate_case_id(self, value, prefix_type: Literal['issue', 'mr', 'pipeline']) -> str:
         prefix = ''
         match prefix_type:
             case 'issue':
@@ -147,7 +149,7 @@ class GitlabConnector:
                 print('[DEBUG] reading data for pipeline: ' + str(pipeline.id))
                 # Pulling pl again due to https://python-gitlab.readthedocs.io/en/v4.4.0/faq.html#attribute-error-list
                 pl = project.pipelines.get(pipeline.id)
-                case_id, link_type = self.find_case_id_for_pl(pl.sha, pl.id)
+                case_id, link_type, mr_iid = self.find_case_id_for_pl(pl.sha, pl.id)
                 local_case = self.generate_case_id(pl.id, 'pipeline')
                 # TODO: create the PL list
                 # pipeline created event
@@ -179,7 +181,8 @@ class GitlabConnector:
                            'duration': duration, 'status': pl.status, 'link_type': link_type, 'case_id': case_id,
                            'pre_merge': self.empty_set_or_value(self.commit_mr_pre_merge_dict, pl.sha),
                            'post_merge': self.empty_set_or_value(self.commit_mr_post_merge_dict, pl.sha),
-                           'commit_list': self.empty_set_or_value(self.commit_mr_commits_dict, pl.sha)}
+                           'commit_list': self.empty_set_or_value(self.commit_mr_commits_dict, pl.sha),
+                           'chosen_mr': mr_iid}
                 self.pl_list.append(pl_dict)
             except (TypeError, KeyError):
                 print('[ERROR] Error occurred retrieving data for: ' + str(pipeline.id) + ' moving to next.')
@@ -264,8 +267,6 @@ class GitlabConnector:
         print('[INFO] scanning issues in project_id: ' + str(self.project_id))
         # --initialising values---
         self.event_logs = []
-        linked_mrs = set()
-        mentioned_mrs = set()
         branch_create_regex = re.compile('created branch')
         assigned_regex = re.compile('assigned to')
         mr_regex = re.compile('mentioned in merge request')
@@ -275,6 +276,8 @@ class GitlabConnector:
         print('[INFO] number of issues found for project: ' + str(len(issues)))
         for issue in issues:
             try:
+                linked_mrs = set()
+                mentioned_mrs = set()
                 print('[DEBUG] reading data for issue: ' + str(issue.iid))
                 # update internal reference dict
                 self.issue_iid_dict[issue.iid] = {}
