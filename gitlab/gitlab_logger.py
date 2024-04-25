@@ -40,6 +40,7 @@ if __name__ == '__main__':
     issue_list = []
     mr_list = []
     pl_list = []
+    commit_list = []
     user_dict = {}
     user_email_map = {}
     # iterate over project ids - as generally single 'project' has multiple gitlab 'projects'
@@ -54,6 +55,7 @@ if __name__ == '__main__':
         issue_list.extend(glc.issue_list)
         mr_list.extend(glc.mr_list)
         pl_list.extend(glc.pl_list)
+        commit_list.extend(glc.commit_list)
         # dictionary merge
         user_dict = {**user_dict, **glc.user_ref}
     print('====== Saving data======')
@@ -63,18 +65,21 @@ if __name__ == '__main__':
     # please use utils/process_mining.py for this task
     issue_df = pd.DataFrame(issue_list)
     mr_df = pd.DataFrame(mr_list)
+    commit_df = pd.DataFrame(commit_list)
+    # dump pipeline data
+    pl_df = pd.DataFrame(pl_list)
     print(event_df.info())
     print(issue_df.info())
     print(mr_df.info())
+    print(commit_df.info())
+    print(pl_df.info())
     # if getting errors here, install pyarrow
     event_df.to_parquet(parquet_file, compression='gzip')
     issue_df.to_parquet('gitlab_issues.parquet.gz', compression='gzip')
     mr_df.to_parquet('gitlab_mrs.parquet.gz', compression='gzip')
+    commit_df.to_parquet('gitlab_commits.parquet.gz', compression='gzip')
+    pl_df.to_parquet('gitlab_pipelines.parquet.gz', compression='gzip')
     # dump user data
     json_file = open(user_json_dump, "w")
     json.dump(user_dict, json_file)
-    # dump pipeline data
-    pl_df = pd.DataFrame(pl_list)
-    print(pl_df.info())
-    pl_df.to_parquet('gitlab_pipelines.parquet.gz', compression='gzip')
 

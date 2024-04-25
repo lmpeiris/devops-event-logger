@@ -16,7 +16,9 @@ class GitlabConnector:
         print('==================================================================')
         print('[INFO] Project id is: ' + str(project_id) + ' path is: ' + self.project_object.path_with_namespace)
         self.event_counter = 0
+        # -------------------------------------------
         # -- dicts for fast ref
+        # -------------------------------------------
         # input - issue iid, provides various info
         self.issue_iid_dict = {}
         # input - issue / mr id, out - created time
@@ -32,19 +34,26 @@ class GitlabConnector:
         self.mr_issue_mention_dict = {}
         # input - mr iid, out - case id
         self.mr_case_id = {}
+        # input - commit hash, out - static commit details as dict
+        self.commit_info = {}
         # input - commit hash, out - mr iid(s) by pre merge commit
         self.commit_mr_pre_merge_dict = {}
         # input - commit hash, out - mr iid(s) by post merge commit
         self.commit_mr_post_merge_dict = {}
         # input - commit hash, out - mr iid(s) by mr's commit list
         self.commit_mr_commits_dict = {}
+        # input - commit hash, out - case id
+        self.commit_case_id = {}
         # input - user (gitlab id or email), out - user ref
         self.user_ref = {}
         # input - user email, out - gitlab user id
         self.user_email_map = {}
+        # input - branch name, out - case id
+        self.branch_case_id = {}
         # --- lists for entity data dumping
         self.issue_list = []
         self.mr_list = []
+        self.commit_list = []
         self.pl_list = []
         self.ext_issue_regex = re.compile(ext_issue_ref_regex)
         self.event_logs = []
@@ -67,27 +76,37 @@ class GitlabConnector:
             link_type = 'undefined'
         return case_id, link_type
 
-    def find_case_id_for_pl(self, pl_sha: str, pl_id: int) -> tuple[str, str, str]:
+    def find_case_id_for_pl(self, pl_sha: str, pl_id: int) -> str:
+        if pl_sha in self.commit_case_id:
+            case_id = self.commit_case_id[pl_sha]
+        else:
+            # TODO: if this hits frequently we may have to implement specific commit pull here
+            print('[WARN] did not find a relation to a commit for pipeline: ' + str(pl_id))
+            case_id = self.generate_case_id(pl_id, 'pipeline')
+        return case_id
+
+    def find_case_id_for_commit(self, commit_sha: str) -> tuple[str, str, str]:
         pre_merge = self.commit_mr_pre_merge_dict
         post_merge = self.commit_mr_post_merge_dict
         commit_list = self.commit_mr_commits_dict
         mr_iid = ''
-        if (pl_sha in pre_merge) and len(pre_merge[pl_sha]) > 0:
-            mr_iid = self.get_max_timed_id(pre_merge[pl_sha], self.mr_created_dict)
+        if (commit_sha in pre_merge) and len(pre_merge[commit_sha]) > 0:
+            mr_iid = self.get_max_timed_id(pre_merge[commit_sha], self.mr_created_dict)
             case_id = self.mr_case_id[mr_iid]
             link_type = 'pre_merge'
-        elif (pl_sha in post_merge) and len(post_merge[pl_sha]) > 0:
-            mr_iid = self.get_max_timed_id(post_merge[pl_sha], self.mr_created_dict)
+        elif (commit_sha in post_merge) and len(post_merge[commit_sha]) > 0:
+            mr_iid = self.get_max_timed_id(post_merge[commit_sha], self.mr_created_dict)
             case_id = self.mr_case_id[mr_iid]
             link_type = 'post_merge'
-        elif (pl_sha in commit_list) and len(commit_list[pl_sha]) > 0:
-            mr_iid = self.get_max_timed_id(commit_list[pl_sha], self.mr_created_dict)
+        elif (commit_sha in commit_list) and len(commit_list[commit_sha]) > 0:
+            mr_iid = self.get_max_timed_id(commit_list[commit_sha], self.mr_created_dict)
             case_id = self.mr_case_id[mr_iid]
             link_type = 'commit_related'
         else:
-            case_id = self.generate_case_id(pl_id, 'pipeline')
+            # generate case id using first 6 digits of sha
+            case_id = self.generate_case_id(commit_sha[:6], 'commit')
             link_type = 'undefined'
-            print('[WARN] did not find a relation to an MR for pipeline: ' + str(pl_id))
+            print('[WARN] did not find a relation to an MR for commit: ' + str(commit_sha))
         return case_id, link_type, str(mr_iid)
 
     def add_event(self, event_id, action, time, case, user, user_ref, local_case, info1: str = '', info2: str = ''):
@@ -111,7 +130,11 @@ class GitlabConnector:
         event_logs = []
         events = self.get_issues_events(prod_run)
         event_logs.extend(events)
+        events = self.get_branch_events(prod_run)
+        event_logs.extend(events)
         events = self.get_mrs_events(prod_run)
+        event_logs.extend(events)
+        events = self.get_commit_events(prod_run)
         event_logs.extend(events)
         events = self.get_pipeline_events(prod_run)
         event_logs.extend(events)
@@ -127,7 +150,7 @@ class GitlabConnector:
             print('[DEBUG] found reference to external issue id: ' + match)
             return match
 
-    def generate_case_id(self, value, prefix_type: Literal['issue', 'mr', 'pipeline']) -> str:
+    def generate_case_id(self, value, prefix_type: Literal['issue', 'mr', 'pipeline', 'commit', 'branch']) -> str:
         prefix = ''
         match prefix_type:
             case 'issue':
@@ -136,6 +159,10 @@ class GitlabConnector:
                 prefix = 'MR'
             case 'pipeline':
                 prefix = 'GLPL'
+            case 'commit':
+                prefix = 'GLC'
+            case 'branch':
+                prefix = 'GLRF'
         return prefix + '-' + str(self.project_id) + '-' + str(value)
 
     def get_pipeline_events(self, prod_run: bool = False) -> list[dict]:
@@ -149,7 +176,7 @@ class GitlabConnector:
                 print('[DEBUG] reading data for pipeline: ' + str(pipeline.id))
                 # Pulling pl again due to https://python-gitlab.readthedocs.io/en/v4.4.0/faq.html#attribute-error-list
                 pl = project.pipelines.get(pipeline.id)
-                case_id, link_type, mr_iid = self.find_case_id_for_pl(pl.sha, pl.id)
+                case_id = self.find_case_id_for_pl(pl.sha, pl.id)
                 local_case = self.generate_case_id(pl.id, 'pipeline')
                 # TODO: create the PL list
                 # pipeline created event
@@ -178,16 +205,63 @@ class GitlabConnector:
                     duration = pl.duration
                 pl_dict = {'id': pl.id, 'source': pl.source, 'sha': pl.sha, 'before_sha': str(pl.before_sha),
                            'author': pl.user['id'], 'created_time': pl.created_at, 'updated_at': pl.updated_at,
-                           'duration': duration, 'status': pl.status, 'link_type': link_type, 'case_id': case_id,
-                           'pre_merge': self.empty_set_or_value(self.commit_mr_pre_merge_dict, pl.sha),
-                           'post_merge': self.empty_set_or_value(self.commit_mr_post_merge_dict, pl.sha),
-                           'commit_list': self.empty_set_or_value(self.commit_mr_commits_dict, pl.sha),
-                           'chosen_mr': mr_iid}
+                           'duration': duration, 'status': pl.status}
                 self.pl_list.append(pl_dict)
             except (TypeError, KeyError):
                 print('[ERROR] Error occurred retrieving data for: ' + str(pipeline.id) + ' moving to next.')
                 traceback.print_exc()
         print('[INFO] number of pipeline related events found: ' + str(len(self.event_logs)))
+        return self.event_logs
+
+    def get_branch_events(self, prod_run: bool = False) -> list[dict]:
+        self.event_logs = []
+        project = self.project_object
+        print('[INFO] scanning branches in project_id: ' + str(self.project_id))
+        branches = project.branches.list(get_all=prod_run)
+        for br in branches:
+            try:
+                if br.name in self.branch_case_id:
+                    case_id = self.branch_case_id[br.name]
+                else:
+                    case_id = self.generate_case_id(br.commit['short_id'], 'branch')
+                # NOTE: commit do not provide gitlab user id, but provides email
+                author_ref = br.commit['author_email']
+                # if we already know gitlab id, then use it instead
+                if author_ref in self.user_email_map:
+                    author_ref = self.user_email_map[br.commit['author_email']]
+                # add branch create event
+                # note: br commit id is branch hash
+                self.add_event(br.commit['id'], 'gl_branch_created', br.commit['created_at'], case_id,
+                               author_ref, br.commit['author_name'], case_id, br.name)
+            except (TypeError, KeyError):
+                print('[ERROR] Error occurred retrieving data for: ' + br.name + ' moving to next.')
+                traceback.print_exc()
+        return self.event_logs
+
+    def get_commit_events(self, prod_run: bool = False) -> list[dict]:
+        self.event_logs = []
+        project = self.project_object
+        print('[INFO] getting commit list for project id: ' + str(self.project_id))
+        # TODO: pulling all commits from repo again is not needed as almost all captured my MRs usually
+        # iterate through the mr commits dict
+        for commit_sha, commit in self.commit_info.items():
+            try:
+                case_id, link_type, mr_iid = self.find_case_id_for_commit(commit_sha)
+                self.commit_case_id[commit_sha] = case_id
+                local_case = self.generate_case_id(commit_sha[:6], 'commit')
+                self.add_event(commit_sha, 'gl_commit', commit['time'], case_id, commit['user'],
+                               commit['user_ref'], local_case, commit['info1'])
+                commit_dict = {'id': commit_sha, 'author': commit['user'], 'created_time': commit['time'],
+                               'case_id': case_id,
+                               'pre_merge': self.empty_set_or_value(self.commit_mr_pre_merge_dict, commit_sha),
+                               'post_merge': self.empty_set_or_value(self.commit_mr_post_merge_dict, commit_sha),
+                               'commit_list': self.empty_set_or_value(self.commit_mr_commits_dict, commit_sha),
+                               'chosen_mr': mr_iid}
+                self.commit_list.append(commit_dict)
+            except (TypeError, KeyError):
+                print('[ERROR] Error occurred retrieving data for: ' + str(commit_sha) + ' moving to next.')
+                traceback.print_exc()
+        print('[INFO] number of commit events found: ' + str(len(self.event_logs)))
         return self.event_logs
 
     def get_mrs_events(self, prod_run: bool = False) -> list[dict]:
@@ -234,8 +308,10 @@ class GitlabConnector:
                     info1 = ''
                     if re.search(merge_commit_regex, commit.message) is not None:
                         info1 = 'merge_commit'
-                    self.add_event(commit.id, 'gl_commit', commit.created_at,
-                                   case_id, author_ref, commit.author_name, local_case, info1)
+                    # we cannot add this event yet since we need to sort out duplicates
+                    # as well as links to MRs
+                    self.commit_info[commit.id] = {'time': commit.created_at, 'user': author_ref,
+                                                   'user_ref': commit.author_name,  'info1': info1}
                     # merge pipelines could be launched from any commit related to MR
                     self.add_link(self.commit_mr_commits_dict, commit.id, mr.iid)
                 # Try to find an external issue id. description can be null
@@ -300,9 +376,9 @@ class GitlabConnector:
                         # get branch name as string
                         issue_branch = note.body.split('`')[1]
                         self.issue_iid_dict[issue.iid]['branches'].append(issue_branch)
-                        # add branch create event
-                        self.add_event(note.id, 'gl_branch_created', note.created_at, case_id,
-                                       note.author['id'], note.author['name'], case_id, issue_branch)
+                        # Don't add branch create event here, just add branch issue reference
+                        # this is because we are pulling the entire list anyway
+                        self.branch_case_id[issue_branch] = case_id
                     # identify any merge requests linked
                     if re.search(mr_regex, note.body) is not None:
                         # get MR iid and add as int
