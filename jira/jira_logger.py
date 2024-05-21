@@ -39,7 +39,7 @@ if __name__ == '__main__':
     issue_df = pd.read_csv(jira_issue_csv, index_col='Issue key', usecols=jira_issue_columns)
 
     # testing with small dataset
-    issue_df = issue_df.iloc[0:2]
+    # issue_df = issue_df.iloc[0:2]
 
     # set proper time format
     for i in ['Created', 'Updated', 'Resolved']:
