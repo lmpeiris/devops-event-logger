@@ -3,18 +3,24 @@ import gitlab
 import re
 import traceback
 import datetime
+import logging
 from typing import Literal
+import sys
+sys.path.insert(0, '../common')
+from LMPLogger import LMPLogger
 
 
 class GitlabConnector:
     def __init__(self, base_url: str, pvt_token: str, project_id: int, ext_issue_ref_regex: str):
-        print('[INFO] Running test auth to: ' + base_url)
+        logger = logging.getLogger('scriptLogger')
+        self.logger = LMPLogger(str(project_id), logger)
+        self.logger.info('Running test auth to: ' + base_url)
         self.gl = gitlab.Gitlab(base_url, private_token=pvt_token)
         self.gl.auth()
         self.project_id = project_id
         self.project_object = self.gl.projects.get(self.project_id)
-        print('==================================================================')
-        print('[INFO] Project id is: ' + str(project_id) + ' path is: ' + self.project_object.path_with_namespace)
+        self.logger.info('==================================================================')
+        self.logger.info('Project id is: ' + str(project_id) + ' path is: ' + self.project_object.path_with_namespace)
         self.event_counter = 0
         # -------------------------------------------
         # -- dicts for fast ref
@@ -59,6 +65,7 @@ class GitlabConnector:
         self.event_logs = []
 
     def find_case_id_for_mr(self, mr_iid: int) -> tuple[str, str]:
+        """Get the case id for a given MR. Returns case_id, link_type as tuple"""
         linked = self.mr_issue_link_dict
         mentioned = self.mr_issue_mention_dict
         if (mr_iid in linked) and len(linked[mr_iid]) > 0:
@@ -67,25 +74,28 @@ class GitlabConnector:
             link_type = 'mr_link'
         elif (mr_iid in mentioned) and len(mentioned[mr_iid]) == 1:
             issue_iid = next(iter(mentioned[mr_iid]))
-            print('[WARN] linking MR to issue using mentions: ' + str(mr_iid))
+            self.logger.warn('linking MR to issue using mentions: ' + str(mr_iid))
             case_id = self.generate_case_id(issue_iid, 'issue')
             link_type = 'mr_mention'
         else:
-            print('[WARN] no relation found to an issue for MR : ' + str(mr_iid))
+            self.logger.warn('no relation found to an issue for MR : ' + str(mr_iid))
             case_id = self.generate_case_id(mr_iid, 'mr')
             link_type = 'undefined'
         return case_id, link_type
 
     def find_case_id_for_pl(self, pl_sha: str, pl_id: int) -> str:
+        """Get the case id for a given pipeline.
+        Provides issue related id if links are found, else provides local scope"""
         if pl_sha in self.commit_case_id:
             case_id = self.commit_case_id[pl_sha]
         else:
             # TODO: if this hits frequently we may have to implement specific commit pull here
-            print('[WARN] did not find a relation to a commit for pipeline: ' + str(pl_id))
+            self.logger.warn('did not find a relation to a commit for pipeline: ' + str(pl_id))
             case_id = self.generate_case_id(pl_id, 'pipeline')
         return case_id
 
     def find_case_id_for_commit(self, commit_sha: str) -> tuple[str, str, str]:
+        """ Get case id for a commit event. Gives case_id, link_type, mr_iid as tuple"""
         pre_merge = self.commit_mr_pre_merge_dict
         post_merge = self.commit_mr_post_merge_dict
         commit_list = self.commit_mr_commits_dict
@@ -106,10 +116,11 @@ class GitlabConnector:
             # generate case id using first 6 digits of sha
             case_id = self.generate_case_id(commit_sha[:6], 'commit')
             link_type = 'undefined'
-            print('[WARN] did not find a relation to an MR for commit: ' + str(commit_sha))
+            self.logger.warn('did not find a relation to an MR for commit: ' + str(commit_sha))
         return case_id, link_type, str(mr_iid)
 
     def add_event(self, event_id, action, time, case, user, user_ref, local_case, info1: str = '', info2: str = ''):
+        """Appends an event to event queue, there is no unique validation here."""
         fields_ok = True
         # carry out None checks
         for i in event_id, action, time, case, user, user_ref, local_case:
@@ -120,13 +131,15 @@ class GitlabConnector:
             #  this function will only hash user_ref
             # adding to dump later as a user reference from all events
             self.user_ref[str(user)] = str(user_ref)
+            # note: none of these id values have a continous function meaning, hence str
             self.event_logs.append({'id': str(event_id), 'action': str(action),
                                     'time': str(time), 'case': str(case),
                                     'user': str(user), 'local_case': local_case,
-                                    'info1': info1, 'info2': info2, 'ns': self.project_id})
+                                    'info1': info1, 'info2': info2, 'ns': str(self.project_id)})
             self.event_counter += 1
 
     def get_all_events(self, prod_run: bool = False) -> list[dict]:
+        """Umbrella method to retreive all events from a gitlab repo"""
         event_logs = []
         events = self.get_issues_events(prod_run)
         event_logs.extend(events)
@@ -141,16 +154,18 @@ class GitlabConnector:
         return event_logs
 
     def find_ext_issue_id(self, input_text: str) -> str:
+        """Find external system issued ticket id using regex"""
         # we are considering the first match only
         result = self.ext_issue_regex.search(input_text)
         if result is None:
             return ''
         else:
             match = result.group(1)
-            print('[DEBUG] found reference to external issue id: ' + match)
+            self.logger.debug('found reference to external issue id: ' + match)
             return match
 
     def generate_case_id(self, value, prefix_type: Literal['issue', 'mr', 'pipeline', 'commit', 'branch']) -> str:
+        """Case id generation logic"""
         prefix = ''
         match prefix_type:
             case 'issue':
@@ -166,14 +181,16 @@ class GitlabConnector:
         return prefix + '-' + str(self.project_id) + '-' + str(value)
 
     def get_pipeline_events(self, prod_run: bool = False) -> list[dict]:
+        """Extract pipeline and job events from the repo"""
         self.event_logs = []
         project = self.project_object
         pipelines = project.pipelines.list(get_all=prod_run)
-        print('[INFO] number of pipelines found for project: ' + str(len(pipelines)))
+        self.logger.info('number of pipelines found for project: ' + str(len(pipelines)))
         for pipeline in pipelines:
             try:
                 # For pipelines, standard is to use global id
-                print('[DEBUG] reading data for pipeline: ' + str(pipeline.id))
+                self.logger.set_arg_only('GLPL-' + str(pipeline.id))
+                self.logger.debug('reading data for pipeline')
                 # Pulling pl again due to https://python-gitlab.readthedocs.io/en/v4.4.0/faq.html#attribute-error-list
                 pl = project.pipelines.get(pipeline.id)
                 case_id = self.find_case_id_for_pl(pl.sha, pl.id)
@@ -187,7 +204,7 @@ class GitlabConnector:
                                pl.user['name'], local_case)
                 # get pipeline jobs
                 jobs = pl.jobs.list(get_all=prod_run)
-                print('[DEBUG] jobs found for pipeline: ' + str(len(jobs)))
+                self.logger.debug('jobs found for pipeline: ' + str(len(jobs)))
                 # TODO: better strategy would be to find when the first job of each stage started,
                 #  and have one event per stage
                 job_ids = set()
@@ -204,19 +221,21 @@ class GitlabConnector:
                 else:
                     duration = pl.duration
                 pl_dict = {'id': pl.id, 'source': pl.source, 'sha': pl.sha, 'before_sha': str(pl.before_sha),
-                           'author': pl.user['id'], 'created_time': pl.created_at, 'updated_at': pl.updated_at,
-                           'duration': duration, 'status': pl.status}
+                           'author': pl.user['id'], 'created_time': pl.created_at, 'updated_time': pl.updated_at,
+                           'duration': duration, 'status': pl.status, 'case_id': case_id, 'project_id': self.project_id}
                 self.pl_list.append(pl_dict)
             except (TypeError, KeyError):
-                print('[ERROR] Error occurred retrieving data for: ' + str(pipeline.id) + ' moving to next.')
+                self.logger.error('Error occurred retrieving data for: ' + str(pipeline.id) + ' moving to next.')
                 traceback.print_exc()
-        print('[INFO] number of pipeline related events found: ' + str(len(self.event_logs)))
+            self.logger.reset_prefix()
+        self.logger.info('number of pipeline related events found: ' + str(len(self.event_logs)))
         return self.event_logs
 
     def get_branch_events(self, prod_run: bool = False) -> list[dict]:
+        """Extract branch creation events from repo"""
         self.event_logs = []
         project = self.project_object
-        print('[INFO] scanning branches in project_id: ' + str(self.project_id))
+        self.logger.info('scanning branches in project_id: ' + str(self.project_id))
         branches = project.branches.list(get_all=prod_run)
         for br in branches:
             try:
@@ -234,14 +253,16 @@ class GitlabConnector:
                 self.add_event(br.commit['id'], 'gl_branch_created', br.commit['created_at'], case_id,
                                author_ref, br.commit['author_name'], case_id, br.name)
             except (TypeError, KeyError):
-                print('[ERROR] Error occurred retrieving data for: ' + br.name + ' moving to next.')
+                self.logger.error('Error occurred retrieving data for: ' + br.name + ' moving to next.')
                 traceback.print_exc()
+        self.logger.info('number of branch events found: ' + str(len(self.event_logs)))
         return self.event_logs
 
     def get_commit_events(self, prod_run: bool = False) -> list[dict]:
+        """Extract commit events from repo"""
         self.event_logs = []
         project = self.project_object
-        print('[INFO] getting commit list for project id: ' + str(self.project_id))
+        self.logger.info('getting commit list for project id: ' + str(self.project_id))
         # TODO: pulling all commits from repo again is not needed as almost all captured my MRs usually
         # iterate through the mr commits dict
         for commit_sha, commit in self.commit_info.items():
@@ -252,28 +273,30 @@ class GitlabConnector:
                 self.add_event(commit_sha, 'gl_commit', commit['time'], case_id, commit['user'],
                                commit['user_ref'], local_case, commit['info1'])
                 commit_dict = {'id': commit_sha, 'author': commit['user'], 'created_time': commit['time'],
-                               'case_id': case_id,
+                               'case_id': case_id, 'project_id': self.project_id,
                                'pre_merge': self.empty_set_or_value(self.commit_mr_pre_merge_dict, commit_sha),
                                'post_merge': self.empty_set_or_value(self.commit_mr_post_merge_dict, commit_sha),
                                'commit_list': self.empty_set_or_value(self.commit_mr_commits_dict, commit_sha),
                                'chosen_mr': mr_iid}
                 self.commit_list.append(commit_dict)
             except (TypeError, KeyError):
-                print('[ERROR] Error occurred retrieving data for: ' + str(commit_sha) + ' moving to next.')
+                self.logger.error('Error occurred retrieving data for: ' + str(commit_sha) + ' moving to next.')
                 traceback.print_exc()
-        print('[INFO] number of commit events found: ' + str(len(self.event_logs)))
+        self.logger.info('number of commit events found: ' + str(len(self.event_logs)))
         return self.event_logs
 
     def get_mrs_events(self, prod_run: bool = False) -> list[dict]:
-        print('[INFO] scanning MRs in project_id: ' + str(self.project_id))
+        """Extract MR events from repo and analyse relations to issues"""
+        self.logger.info('scanning MRs in project_id: ' + str(self.project_id))
         self.event_logs = []
         merge_commit_regex = re.compile('Merge branch')
         project = self.project_object
         merge_requests = project.mergerequests.list(get_all=prod_run)
-        print('[INFO] number of MRs found for project: ' + str(len(merge_requests)))
+        self.logger.info('number of MRs found for project: ' + str(len(merge_requests)))
         for mr in merge_requests:
             try:
-                print('[DEBUG] reading data for MR: ' + str(mr.iid))
+                self.logger.set_arg_only('MR-' + str(mr.iid))
+                self.logger.debug('reading data for MR')
                 case_id, link_type = self.find_case_id_for_mr(mr.iid)
                 local_case = self.generate_case_id(mr.iid, 'mr')
                 self.mr_case_id[mr.iid] = case_id
@@ -297,7 +320,7 @@ class GitlabConnector:
                 # find commit events
                 # TODO: commits which are not allocated to a MR or squashed will not be found
                 commits = mr.commits()
-                print('[DEBUG] commits found related to MR: ' + str(len(commits)))
+                self.logger.debug('commits found related to MR: ' + str(len(commits)))
                 for commit in commits:
                     # NOTE: commit do not provide gitlab user id, but provides email
                     author_ref = commit.author_email
@@ -334,13 +357,15 @@ class GitlabConnector:
                            'link_type': link_type}
                 self.mr_list.append(mr_dict)
             except (TypeError, KeyError):
-                print('[ERROR] Error occurred retrieving data for: ' + str(mr.iid) + ' moving to next.')
+                self.logger.error('Error occurred retrieving data for: ' + str(mr.iid) + ' moving to next.')
                 traceback.print_exc()
-        print('[INFO] number of MR related events found: ' + str(len(self.event_logs)))
+            self.logger.reset_prefix()
+        self.logger.info('number of MR related events found: ' + str(len(self.event_logs)))
         return self.event_logs
 
     def get_issues_events(self, prod_run: bool = False) -> list[dict]:
-        print('[INFO] scanning issues in project_id: ' + str(self.project_id))
+        """Get gitlab issue related events, find relations to MRs and external issues"""
+        self.logger.info('scanning issues in project_id: ' + str(self.project_id))
         # --initialising values---
         self.event_logs = []
         branch_create_regex = re.compile('created branch')
@@ -349,12 +374,13 @@ class GitlabConnector:
         # ----------
         project = self.project_object
         issues = project.issues.list(get_all=prod_run)
-        print('[INFO] number of issues found for project: ' + str(len(issues)))
+        self.logger.info('number of issues found for project: ' + str(len(issues)))
         for issue in issues:
             try:
+                self.logger.set_arg_only('GLI-' + str(issue.iid))
                 linked_mrs = set()
                 mentioned_mrs = set()
-                print('[DEBUG] reading data for issue: ' + str(issue.iid))
+                self.logger.debug('reading data for issue')
                 # update internal reference dict
                 self.issue_iid_dict[issue.iid] = {}
                 self.issue_iid_dict[issue.iid]['id'] = issue.id
@@ -363,7 +389,7 @@ class GitlabConnector:
                 case_id = self.generate_case_id(issue.iid, 'issue')
                 # read through notes to find assign events and branch creation
                 notes = issue.notes.list(get_all=prod_run)
-                print('[DEBUG] notes found for issue: ' + str(len(notes)))
+                self.logger.debug('notes found for issue: ' + str(len(notes)))
                 for note in notes:
                     # TODO: issue comments are not supported yet
                     # check whether there's assigned note
@@ -397,7 +423,8 @@ class GitlabConnector:
                 self.issue_mr_mention_dict[issue.iid] = mentioned_mrs
                 # create event log for create issue event
                 self.add_event(issue.id, 'gl_issue_created',
-                               issue.created_at, case_id, issue.author['id'], issue.author['name'], case_id)
+                               issue.created_at, case_id, issue.author['id'], issue.author['name'], case_id,
+                               issue.issue_type)
                 # closed event
                 if issue.closed_at is not None:
                     # issue.closed_by is a method which does something else
@@ -411,14 +438,15 @@ class GitlabConnector:
                     ext_issue_id = self.find_ext_issue_id(issue.title)
                 # id is the global id, iid is project specific id
                 issue_dict = {'id': issue.id, 'iid': issue.iid, 'title': issue.title, 'author_id': issue.author['id'],
-                              'created_time': issue.created_at,
+                              'created_time': issue.created_at, 'type': issue.issue_type,
                               'updated_time': issue.updated_at, 'state': issue.state, 'project_id': issue.project_id,
                               'ext_issue_id': ext_issue_id, 'linked_mrs': linked_mrs, 'mentioned_mrs': mentioned_mrs}
                 self.issue_list.append(issue_dict)
             except (TypeError, KeyError):
-                print('[ERROR] Error occurred retrieving data for: ' + str(issue.iid) + ' moving to next.')
+                self.logger.error('Error occurred retrieving data for: ' + str(issue.iid) + ' moving to next.')
                 traceback.print_exc()
-        print('[INFO] number of issue related events found: ' + str(len(self.event_logs)))
+            self.logger.reset_prefix()
+        self.logger.info('number of issue related events found: ' + str(len(self.event_logs)))
         return self.event_logs
 
     @classmethod

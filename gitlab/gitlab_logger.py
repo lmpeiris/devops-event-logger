@@ -2,10 +2,12 @@ import pandas as pd
 from GitlabConnector import GitlabConnector
 import json
 import csv
+import logging
+import logging.config
 
 
 def load_user_email_map(file_path_to_file: str, target_dict: dict):
-    print('[INFO] opening gitlab id email map file: ' + file_path_to_file)
+    logger.info('opening gitlab id email map file: ' + file_path_to_file)
     with open(file_path_to_file, 'r') as user_file:
         reader = csv.reader(user_file, delimiter=',')
         for row in reader:
@@ -43,6 +45,9 @@ if __name__ == '__main__':
     commit_list = []
     user_dict = {}
     user_email_map = {}
+    # initialise logger
+    logging.config.fileConfig('../common/logging.conf')
+    logger = logging.getLogger('scriptLogger')
     # iterate over project ids - as generally single 'project' has multiple gitlab 'projects'
     # you can get project id by going to project id page and click on right hand side context menu
     load_user_email_map(gitlab_id_email_csv, user_email_map)
@@ -58,21 +63,35 @@ if __name__ == '__main__':
         commit_list.extend(glc.commit_list)
         # dictionary merge
         user_dict = {**user_dict, **glc.user_ref}
-    print('====== Saving data======')
+    logger.info('====== Saving data======')
     # converting to pandas dataframes
     event_df = pd.DataFrame(event_logs)
+    # convert event log to datetime
+    event_df['time'] = pd.to_datetime(event_df['time'], utc=True)
     # use pm4py.format_dataframe and then pm4py.convert_to_event_log to convert this to an event log
     # please use utils/process_mining.py for this task
     issue_df = pd.DataFrame(issue_list)
+    for i in ['created_time', 'updated_time']:
+        issue_df[i] = pd.to_datetime(issue_df[i], utc=True)
     mr_df = pd.DataFrame(mr_list)
+    for i in ['created_time', 'updated_time']:
+        mr_df[i] = pd.to_datetime(mr_df[i], utc=True)
     commit_df = pd.DataFrame(commit_list)
+    commit_df['created_time'] = pd.to_datetime(commit_df['created_time'], utc=True)
     # dump pipeline data
     pl_df = pd.DataFrame(pl_list)
-    print(event_df.info())
-    print(issue_df.info())
-    print(mr_df.info())
-    print(commit_df.info())
-    print(pl_df.info())
+    for i in ['created_time', 'updated_time']:
+        pl_df[i] = pd.to_datetime(pl_df[i], utc=True)
+    logger.info('====== event summary ======')
+    logger.info(event_df.info())
+    logger.info('====== issue summary ======')
+    logger.info(issue_df.info())
+    logger.info('====== MR summary ======')
+    logger.info(mr_df.info())
+    logger.info('====== commit summary ======')
+    logger.info(commit_df.info())
+    logger.info('====== pipeline summary ======')
+    logger.info(pl_df.info())
     # if getting errors here, install pyarrow
     event_df.to_parquet(parquet_file, compression='gzip')
     issue_df.to_parquet('gitlab_issues.parquet.gz', compression='gzip')

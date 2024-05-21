@@ -1,24 +1,30 @@
 import pandas as pd
 import time
 from jiraConnector import JiraConnector
+import json
+import logging
+import logging.config
 
 if __name__ == '__main__':
     # ===== configurations ===============
     # Export jira issue csv with all fields using jira UI itself
     # Note: put 'r' prefix below for windows paths when using absolute path.
     # Not needed for linux paths or relative paths
-    jira_issue_csv = r'C:\Users\malshan\Documents\log-collector\JIRAOld.csv'
+    # WARNING: CSV export is known to skip tracks in fields when csv is decoded
+    jira_issue_csv = r'C:\Users\malshan\Documents\log-collector\ops\jira_combined_ops.csv'
     # TODO: by default jira can only export 1000 issues to csv. Ok for projects with less than that
     #  You may use time query to generate multiple csvs and combine
     #  or use python-jira https://jira.readthedocs.io/api.html#jira.client.JIRA.search_issues
 
     # parquet to save the event_logs dataframe; compressed in gz
-    parquet_file = 'jira_event_logs_2.parquet.gz'
+    parquet_file = 'jira_event_logs_ops.parquet.gz'
     # Note: reporter id is jira id
     # 'Summary' excluded as too long
-    jira_issue_columns = ['Issue key', 'Issue id', 'Reporter Id', 'Created', 'Updated', 'Resolved', 'Affects versions', 'Parent']
+    jira_issue_columns = ['Issue key', 'Issue id', 'Reporter Id', 'Created', 'Updated', 'Resolved', 'Parent']
     # delay between api calls for issues
     issue_api_delay = 1
+    # save user emails to json - will be disabled if data security mode is on
+    user_json = 'jira_users.json'
 
     # jira instance and authentication
     jira_url = "https://xxxxxx.atlassian.net"
@@ -26,23 +32,26 @@ if __name__ == '__main__':
     auth_email = "abc@xxx"
 
     # ======= start of code =============
+    # initialise logger
+    logging.config.fileConfig('../common/logging.conf')
+    logger = logging.getLogger('scriptLogger')
     # load jira issues
     issue_df = pd.read_csv(jira_issue_csv, index_col='Issue key', usecols=jira_issue_columns)
 
     # testing with small dataset
-    # issue_df = issue_df.iloc[0:2]
+    issue_df = issue_df.iloc[0:2]
 
     # set proper time format
     for i in ['Created', 'Updated', 'Resolved']:
         issue_df[i] = pd.to_datetime(issue_df[i], format='%d/%b/%y %I:%M %p')
-    print('======== Loaded issues: ===========')
-    print(issue_df.info)
+    logger.info('======== Loaded issues: ===========')
+    logger.info(issue_df.info)
 
     # initialize global var
     event_logs = []
     user_info_dict = {}
     # initialize jira connector
-    print('======== Jira api calls starting : ===========')
+    logger.info('======== Jira api calls starting : ===========')
     issue_count = 0
     jira_api = JiraConnector(jira_url, auth_token, auth_email)
     for jira_issue_key in issue_df.index:
@@ -69,13 +78,18 @@ if __name__ == '__main__':
         comment_events = jira_api.get_comments(jira_issue_key)
         event_logs.extend(comment_events)
         cur_progress = str(len(event_logs))
-        print('[INFO] Events found so far ' + str(len(event_logs)) + ', issues completed: ' + str(issue_count))
+        logger.info('Events found so far ' + str(len(event_logs)) + ', issues completed: ' + str(issue_count))
     # create df
     event_df = pd.DataFrame(event_logs)
     # use pm4py.format_dataframe and then pm4py.convert_to_event_log to convert this to an event log
     # please use utils/process_mining.py for this task
-    print('======== Event log data: ===========')
-    print(event_df.info())
+    logger.info('======== Event log data: ===========')
+    logger.info(event_df.info())
     # if getting errors here, install pyarrow
     event_df.to_parquet(parquet_file, compression='gzip')
+    # write users to file if enabled
+    # TODO: this only collects info from issue reporters - use a object property
+    if user_json != '':
+        with open(user_json, 'w') as user_file:
+            json.dump(user_info_dict, user_file)
 

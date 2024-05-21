@@ -4,6 +4,10 @@ from requests.auth import HTTPBasicAuth
 import datetime
 import pandas as pd
 import traceback
+import logging
+import sys
+sys.path.insert(0, '../common')
+from LMPLogger import LMPLogger
 
 
 class JiraConnector:
@@ -11,11 +15,14 @@ class JiraConnector:
         self.auth = HTTPBasicAuth(auth_email, auth_token)
         self.headers = {"Accept": "application/json"}
         self.jira_url = jira_url
-        print('Jira base url: ' + jira_url)
+        logger = logging.getLogger('scriptLogger')
+        self.logger = LMPLogger('', logger)
+        self.logger.info('Jira base url: ' + jira_url)
 
     def request(self, url_suffix, method: str = "GET", payload: dict = None, params: dict = None) -> dict:
+        """Request sending method with error checking and logging integrated"""
         request_url = self.jira_url + url_suffix
-        print('[DEBUG] sending ' + method + ' to : ' + url_suffix)
+        self.logger.debug('sending ' + method + ' to : ' + url_suffix)
         try:
             if params is None:
                 response = requests.request(method, request_url, headers=self.headers, auth=self.auth)
@@ -23,25 +30,29 @@ class JiraConnector:
                 response = requests.request(method, request_url, headers=self.headers, auth=self.auth,
                                             params=params)
             if response.status_code > 399:
-                print('[WARN] received error code ' + str(response.status_code) + ' when calling ' + request_url)
-                print(response.text)
+                self.logger.warn('received error code ' + str(response.status_code) + ' when calling ' + request_url)
+                self.logger.warn(response.text)
             else:
                 return json.loads(response.text)
         except:
-            print('[ERROR] Error occured in jira api request. ignoring')
+            self.logger.error('Error occured in jira api request. ignoring')
             traceback.print_exc()
             return {}
 
     def get_data(self, url_suffix: str, params: dict = None) -> dict:
+        """Wrapper method for http get calls to jira api"""
         response = self.request(url_suffix, 'GET', None, params)
         return response
 
     def get_email_by_user_id(self, jira_user_id: str) -> str:
+        """This method sends an api call to /rest/api/3/user"""
         url_suffix = '/rest/api/3/user'
         response = self.get_data(url_suffix, {'accountId': jira_user_id})
         return response['emailAddress']
 
     def get_change_log(self, issue_key) -> list[dict]:
+        """get changelog history via call to /rest/api/3/issue"""
+        self.logger.set_prefix([issue_key])
         url_suffix = '/rest/api/3/issue/' + issue_key + '/changelog'
         response = self.get_data(url_suffix)
         # initialize event_logs return array
@@ -54,7 +65,8 @@ class JiraConnector:
                 if 'emailAddress' in event['author']:
                     actor_email = event['author']['emailAddress']
                 else:
-                    # users without emails are most probably bots
+                    # assumption: users without emails are most probably bots
+                    # TODO: this assumption is not always true. put a proper logic to handle
                     actor_email = event['author']['displayName']
                     action = 'bot_activity'
                 for item in event['items']:
@@ -72,11 +84,13 @@ class JiraConnector:
                                       'time': event_time, 'case': issue_key}
                         event_logs.append(event_dict)
         except KeyError as e:
-            print('[ERROR] KeyError occured: ' + str(e))
+            self.logger.error('KeyError occured: ' + str(e))
             traceback.print_exc()
         return event_logs
 
     def get_comments(self, issue_key) -> list[dict]:
+        """Get comment details for a given issue via /rest/api/3/issue/"""
+        self.logger.set_prefix([issue_key])
         url_suffix = '/rest/api/3/issue/' + issue_key + '/comment'
         response = self.get_data(url_suffix)
         # initialize event_logs return array
@@ -85,6 +99,7 @@ class JiraConnector:
             for event in response['comments']:
                 event_id = str(event['id'])
                 # we do not need bot comments
+                # TODO: this assumption is not always true. put a proper logic to handle
                 if 'emailAddress' in event['author']:
                     actor_email = event['author']['emailAddress']
                     event_time = self.strip_tz_get_pd_timestamp(event['created'])
@@ -99,5 +114,6 @@ class JiraConnector:
 
     @classmethod
     def strip_tz_get_pd_timestamp(cls, iso_datetime_with_tz):
+        """Converts iso datetime with tz to pandas timestamp, without tz - without time conversions"""
         #TODO: check whether this messes up the time if jira reports different tz
         return pd.Timestamp(datetime.datetime.fromisoformat(iso_datetime_with_tz).replace(tzinfo=None))
