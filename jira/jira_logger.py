@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import time
 from jiraConnector import JiraConnector
@@ -5,31 +6,33 @@ import json
 import logging
 import logging.config
 
+
 if __name__ == '__main__':
     # ===== configurations ===============
     # Export jira issue csv with all fields using jira UI itself
     # Note: put 'r' prefix below for windows paths when using absolute path.
     # Not needed for linux paths or relative paths
     # WARNING: CSV export is known to skip tracks in fields when csv is decoded
-    jira_issue_csv = r'C:\Users\malshan\Documents\log-collector\ops\jira_combined_ops.csv'
+    # when running via container, need to mount the folder
+    jira_issue_csv = 'input/jira_issue.csv'
     # TODO: by default jira can only export 1000 issues to csv. Ok for projects with less than that
     #  You may use time query to generate multiple csvs and combine
     #  or use python-jira https://jira.readthedocs.io/api.html#jira.client.JIRA.search_issues
 
-    # parquet to save the event_logs dataframe; compressed in gz
-    parquet_file = 'jira_event_logs_ops.parquet.gz'
-    # Note: reporter id is jira id
+    # parquet file suffix to use for saving dataframe; compressed in gz
+    parquet_suffix = os.environ['JIRA_PARQUET_SUFFIX']
+    # Note: reporter id is jira id. For now, do not expose via environment var
     # 'Summary' excluded as too long
     jira_issue_columns = ['Issue key', 'Issue id', 'Reporter Id', 'Created', 'Updated', 'Resolved', 'Parent']
-    # delay between api calls for issues
-    issue_api_delay = 1
+    # delay in seconds between api calls for issues
+    issue_api_delay = float(os.environ['JIRA_API_DELAY'])
     # save user emails to json - will be disabled if data security mode is on
-    user_json = 'jira_users.json'
+    user_json = os.environ['JIRA_USER_JSON']
 
     # jira instance and authentication
-    jira_url = "https://xxxxxx.atlassian.net"
-    auth_token = "xxxxxx"
-    auth_email = "abc@xxx"
+    jira_url = os.environ['JIRA_URL']
+    auth_token = os.environ['JIRA_AUTH_TOKEN']
+    auth_email = os.environ['JIRA_AUTH_EMAIL']
 
     # ======= start of code =============
     # initialise logger
@@ -86,7 +89,7 @@ if __name__ == '__main__':
     logger.info('======== Event log data: ===========')
     logger.info(event_df.info())
     # if getting errors here, install pyarrow
-    event_df.to_parquet(parquet_file, compression='gzip')
+    event_df.to_parquet('jira_event_log_' + parquet_suffix + '.parquet.gz', compression='gzip')
     # write users to file if enabled
     # TODO: this only collects info from issue reporters - use a object property
     if user_json != '':

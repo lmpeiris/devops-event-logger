@@ -11,13 +11,13 @@ from LMPLogger import LMPLogger
 
 
 class GitlabConnector:
-    def __init__(self, base_url: str, pvt_token: str, project_id: int, ext_issue_ref_regex: str):
+    def __init__(self, base_url: str, pvt_token: str, project_id: str, ext_issue_ref_regex: str):
         logger = logging.getLogger('scriptLogger')
         self.logger = LMPLogger(str(project_id), logger)
         self.logger.info('Running test auth to: ' + base_url)
         self.gl = gitlab.Gitlab(base_url, private_token=pvt_token)
         self.gl.auth()
-        self.project_id = project_id
+        self.project_id = int(project_id)
         self.project_object = self.gl.projects.get(self.project_id)
         self.logger.info('==================================================================')
         self.logger.info('Project id is: ' + str(project_id) + ' path is: ' + self.project_object.path_with_namespace)
