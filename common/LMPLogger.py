@@ -6,6 +6,8 @@ class LMPLogger:
         self.logger = logger
         self.init_prefix = '[' + init_prefix + ']'
         self.prefix = str(self.init_prefix)
+        # calling instance method from init - just to test
+        self.info('LMPLogger v0.0.1 initialised')
         # TODO: use record factory for better logging
         #  https://stackoverflow.com/questions/17558552/how-do-i-add-custom-field-to-python-log-format-string
 

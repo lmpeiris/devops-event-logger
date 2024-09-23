@@ -7,16 +7,15 @@ import traceback
 import logging
 import sys
 sys.path.insert(0, '../common')
-from LMPLogger import LMPLogger
+from DevOpsConnector import DevOpsConnector
 
 
-class JiraConnector:
-    def __init__(self, jira_url, auth_token, auth_email):
+class JiraConnector(DevOpsConnector):
+    def __init__(self, jira_url, auth_token, namespace, auth_email):
+        DevOpsConnector.__init__(self, namespace)
         self.auth = HTTPBasicAuth(auth_email, auth_token)
         self.headers = {"Accept": "application/json"}
         self.jira_url = jira_url
-        logger = logging.getLogger('scriptLogger')
-        self.logger = LMPLogger('', logger)
         self.logger.info('Jira base url: ' + jira_url)
 
     def request(self, url_suffix, method: str = "GET", payload: dict = None, params: dict = None) -> dict:
@@ -50,13 +49,12 @@ class JiraConnector:
         response = self.get_data(url_suffix, {'accountId': jira_user_id})
         return response['emailAddress']
 
-    def get_change_log(self, issue_key) -> list[dict]:
+    def get_change_log_per_issue(self, issue_key) -> list[dict]:
         """get changelog history via call to /rest/api/3/issue"""
         self.logger.set_prefix([issue_key])
+        self.event_logs = []
         url_suffix = '/rest/api/3/issue/' + issue_key + '/changelog'
         response = self.get_data(url_suffix)
-        # initialize event_logs return array
-        event_logs = []
         try:
             for event in response['values']:
                 event_id = str(event['id'])
@@ -80,21 +78,19 @@ class JiraConnector:
                         case 'timespent':
                             action = 'time_logged'
                     if action != '':
-                        event_dict = {'id': event_id, 'title': '', 'action': action, 'user': actor_email,
-                                      'time': event_time, 'case': issue_key}
-                        event_logs.append(event_dict)
+                        self.add_event(event_id, action, event_time, issue_key, actor_email, '', issue_key)
         except KeyError as e:
             self.logger.error('KeyError occured: ' + str(e))
             traceback.print_exc()
-        return event_logs
+        self.logger.info('number of change log related events found: ' + str(len(self.event_logs)))
+        return self.event_logs
 
-    def get_comments(self, issue_key) -> list[dict]:
+    def get_comments_per_issue(self, issue_key) -> list[dict]:
         """Get comment details for a given issue via /rest/api/3/issue/"""
         self.logger.set_prefix([issue_key])
+        self.event_logs = []
         url_suffix = '/rest/api/3/issue/' + issue_key + '/comment'
         response = self.get_data(url_suffix)
-        # initialize event_logs return array
-        event_logs = []
         try:
             for event in response['comments']:
                 event_id = str(event['id'])
@@ -104,13 +100,12 @@ class JiraConnector:
                     actor_email = event['author']['emailAddress']
                     event_time = self.strip_tz_get_pd_timestamp(event['created'])
                     action = 'jira_commented'
-                    event_dict = {'id': event_id, 'title': '', 'action': action, 'user': actor_email,
-                                  'time': event_time, 'case': issue_key}
-                    event_logs.append(event_dict)
+                    self.add_event(event_id, action, event_time, issue_key, actor_email, '', issue_key)
         except KeyError as e:
             print('[ERROR] KeyError occured: ' + str(e))
             traceback.print_exc()
-        return event_logs
+        self.logger.info('number of comments related events found: ' + str(len(self.event_logs)))
+        return self.event_logs
 
     @classmethod
     def strip_tz_get_pd_timestamp(cls, iso_datetime_with_tz):

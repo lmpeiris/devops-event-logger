@@ -3,7 +3,6 @@ import pandas as pd
 import time
 from jiraConnector import JiraConnector
 import json
-import logging
 import logging.config
 
 
@@ -56,7 +55,7 @@ if __name__ == '__main__':
     # initialize jira connector
     logger.info('======== Jira api calls starting : ===========')
     issue_count = 0
-    jira_api = JiraConnector(jira_url, auth_token, auth_email)
+    jira_api = JiraConnector(jira_url, auth_token, 'default', auth_email)
     for jira_issue_key in issue_df.index:
         issue_count = issue_count+1
         time.sleep(issue_api_delay)
@@ -71,14 +70,14 @@ if __name__ == '__main__':
             user_email = jira_api.get_email_by_user_id(jira_user_id)
             user_info_dict[jira_user_id] = user_email
         # Note: id field should be kept as string object fo compatibility with hashes
-        created_event = {'id': str(row['Issue id']), 'title': '', 'action': 'jira_created', 'user': user_email,
-                         'time': row['Created'], 'case': jira_issue_key}
+        created_event = jira_api.add_event(str(row['Issue id']), 'jira_created', row['Created'], jira_issue_key,
+                                           user_email, '', jira_issue_key)
         event_logs.append(created_event)
         # get events from changelog
-        change_logs = jira_api.get_change_log(jira_issue_key)
+        change_logs = jira_api.get_change_log_per_issue(jira_issue_key)
         event_logs.extend(change_logs)
         # get comment events
-        comment_events = jira_api.get_comments(jira_issue_key)
+        comment_events = jira_api.get_comments_per_issue(jira_issue_key)
         event_logs.extend(comment_events)
         cur_progress = str(len(event_logs))
         logger.info('Events found so far ' + str(len(event_logs)) + ', issues completed: ' + str(issue_count))
@@ -92,7 +91,8 @@ if __name__ == '__main__':
     event_df.to_parquet('jira_event_log_' + parquet_suffix + '.parquet.gz', compression='gzip')
     # write users to file if enabled
     # TODO: this only collects info from issue reporters - use a object property
-    if user_json != '':
+    # if user_json is a space avoid writing user file
+    if user_json != ' ':
         with open(user_json, 'w') as user_file:
             json.dump(user_info_dict, user_file)
 

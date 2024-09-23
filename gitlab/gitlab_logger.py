@@ -2,7 +2,6 @@ import pandas as pd
 from GitlabConnector import GitlabConnector
 import json
 import csv
-import logging
 import logging.config
 import os
 import sys
