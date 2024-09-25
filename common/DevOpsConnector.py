@@ -3,10 +3,11 @@ from LMPLogger import LMPLogger
 
 
 class DevOpsConnector:
-    def __init__(self, namespace: str):
+    def __init__(self, namespace: str, api_delay: int):
         logger = logging.getLogger('scriptLogger')
         self.logger = LMPLogger(str(namespace), logger)
         self.namespace = namespace
+        self.api_delay = api_delay
         # --- variable initialization ----
         # input - user (gitlab id or email), out - user ref
         self.user_ref = {}
@@ -39,9 +40,8 @@ class DevOpsConnector:
 
     def get_all_events(self, event_get_method_list: list, prod_run: bool = False) -> list[dict]:
         """Umbrella method to retreive all events from a gitlab repo"""
-        event_logs = []
         for method in event_get_method_list:
-            events = getattr(self, method)(prod_run)
-            event_logs.extend(events)
-        return event_logs
+            getattr(self, method)(prod_run)
+        return self.event_logs
+
 

@@ -1,0 +1,7 @@
+{
+  "jira": {
+    "issue_columns": ["Issue key", "Issue id", "Reporter Id", "Created", "Updated", "Resolved", "Parent", "Issue Type",
+      "Reporter"],
+    "get_all_events_order": ["get_all_events"]
+  }
+}

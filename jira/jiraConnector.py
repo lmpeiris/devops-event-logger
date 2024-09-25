@@ -3,20 +3,23 @@ import json
 from requests.auth import HTTPBasicAuth
 import datetime
 import pandas as pd
+import pandas.core.frame
 import traceback
-import logging
+import time
 import sys
 sys.path.insert(0, '../common')
 from DevOpsConnector import DevOpsConnector
 
 
 class JiraConnector(DevOpsConnector):
-    def __init__(self, jira_url, auth_token, namespace, auth_email):
-        DevOpsConnector.__init__(self, namespace)
+    def __init__(self, jira_url, auth_token, namespace, auth_email, api_delay: int = 1):
+        DevOpsConnector.__init__(self, namespace, api_delay)
         self.auth = HTTPBasicAuth(auth_email, auth_token)
         self.headers = {"Accept": "application/json"}
         self.jira_url = jira_url
         self.logger.info('Jira base url: ' + jira_url)
+        # this is not user_ref; this gives email for jira id (reverse)
+        self.jira_id_email = {}
 
     def request(self, url_suffix, method: str = "GET", payload: dict = None, params: dict = None) -> dict:
         """Request sending method with error checking and logging integrated"""
@@ -43,30 +46,36 @@ class JiraConnector(DevOpsConnector):
         response = self.request(url_suffix, 'GET', None, params)
         return response
 
-    def get_email_by_user_id(self, jira_user_id: str) -> str:
+    def get_email_by_account_id(self, jira_account_id: str) -> str:
         """This method sends an api call to /rest/api/3/user"""
-        url_suffix = '/rest/api/3/user'
-        response = self.get_data(url_suffix, {'accountId': jira_user_id})
-        return response['emailAddress']
+        # avoid using same api call again
+        if jira_account_id in self.jira_id_email:
+            user_email = self.jira_id_email[jira_account_id]
+        else:
+            url_suffix = '/rest/api/3/user'
+            response = self.get_data(url_suffix, {'accountId': jira_account_id})
+            user_email = response['emailAddress']
+            self.jira_id_email[jira_account_id] = user_email
+        return user_email
 
-    def get_change_log_per_issue(self, issue_key) -> list[dict]:
+    def get_change_log_per_issue(self, issue_key, case_id) -> list[dict]:
         """get changelog history via call to /rest/api/3/issue"""
         self.logger.set_prefix([issue_key])
-        self.event_logs = []
+        self.event_counter = 0
         url_suffix = '/rest/api/3/issue/' + issue_key + '/changelog'
         response = self.get_data(url_suffix)
         try:
             for event in response['values']:
                 event_id = str(event['id'])
                 event_time = self.strip_tz_get_pd_timestamp(event['created'])
-                action = ''
+                display_name = event['author']['displayName']
+                # emailAddress may not always be provided
                 if 'emailAddress' in event['author']:
-                    actor_email = event['author']['emailAddress']
+                    user_email = event['author']['emailAddress']
                 else:
-                    # assumption: users without emails are most probably bots
-                    # TODO: this assumption is not always true. put a proper logic to handle
-                    actor_email = event['author']['displayName']
-                    action = 'bot_activity'
+                    account_id = event['author']['accountId']
+                    user_email = self.get_email_by_account_id(account_id)
+                action = ''
                 for item in event['items']:
                     match item['field']:
                         case 'assignee':
@@ -74,21 +83,21 @@ class JiraConnector(DevOpsConnector):
                         # case 'resolution':
                         #     action = item['toString']
                         case 'status':
-                            action = item['toString']
+                            action = 'jira_' + item['toString']
                         case 'timespent':
-                            action = 'time_logged'
+                            action = 'jira_time_logged'
                     if action != '':
-                        self.add_event(event_id, action, event_time, issue_key, actor_email, '', issue_key)
+                        self.add_event(event_id, action, event_time, case_id, user_email, display_name, issue_key)
         except KeyError as e:
             self.logger.error('KeyError occured: ' + str(e))
             traceback.print_exc()
-        self.logger.info('number of change log related events found: ' + str(len(self.event_logs)))
+        self.logger.info('number of change log related events found: ' + str(self.event_counter))
         return self.event_logs
 
-    def get_comments_per_issue(self, issue_key) -> list[dict]:
+    def get_comments_per_issue(self, issue_key, case_id) -> list[dict]:
         """Get comment details for a given issue via /rest/api/3/issue/"""
         self.logger.set_prefix([issue_key])
-        self.event_logs = []
+        self.event_counter = 0
         url_suffix = '/rest/api/3/issue/' + issue_key + '/comment'
         response = self.get_data(url_suffix)
         try:
@@ -96,16 +105,55 @@ class JiraConnector(DevOpsConnector):
                 event_id = str(event['id'])
                 # we do not need bot comments
                 # TODO: this assumption is not always true. put a proper logic to handle
+                # emailAddress may not always be provided
                 if 'emailAddress' in event['author']:
-                    actor_email = event['author']['emailAddress']
-                    event_time = self.strip_tz_get_pd_timestamp(event['created'])
-                    action = 'jira_commented'
-                    self.add_event(event_id, action, event_time, issue_key, actor_email, '', issue_key)
+                    user_email = event['author']['emailAddress']
+                else:
+                    account_id = event['author']['accountId']
+                    user_email = self.get_email_by_account_id(account_id)
+                display_name = event['author']['displayName']
+                event_time = self.strip_tz_get_pd_timestamp(event['created'])
+                action = 'jira_commented'
+                self.add_event(event_id, action, event_time, case_id, user_email, display_name, issue_key)
+
         except KeyError as e:
             print('[ERROR] KeyError occured: ' + str(e))
             traceback.print_exc()
-        self.logger.info('number of comments related events found: ' + str(len(self.event_logs)))
+        self.logger.info('number of comments related events found: ' + str(self.event_counter))
         return self.event_logs
+
+    def iterate_issues(self, issue_df: pandas.core.frame.DataFrame):
+        issue_count = 0
+        # remove any missing values with 'na' in parent field
+        issue_df["Parent"] = issue_df["Parent"].fillna('na')
+        for jira_issue_key in issue_df.index:
+            issue_count = issue_count + 1
+            time.sleep(self.api_delay)
+            # add entry for create event
+            row = issue_df.loc[jira_issue_key]
+            # TODO: read from configmap
+            account_id = row['Reporter Id']
+            display_name = row['Reporter']
+            issue_type = row['Issue Type']
+            epic_parent = row['Parent']
+            issue_id = row['Issue id']
+            event_time = row['Created']
+            user_email = self.get_email_by_account_id(account_id)
+            # Note: id field should be kept as string object for compatibility with hashes
+            # epic case detection logic
+            case_id = jira_issue_key
+            action = 'jira_created'
+            if epic_parent != 'na':
+                case_id = epic_parent
+                action = 'jira_sub_created'
+            self.add_event(str(issue_id), action, event_time, case_id,
+                           user_email, display_name, jira_issue_key, issue_type)
+            # get events from changelog
+            self.get_change_log_per_issue(jira_issue_key, case_id)
+            # get comment events
+            self.get_comments_per_issue(jira_issue_key, case_id)
+            cur_progress = str(len(self.event_logs))
+            self.logger.info('Events found so far ' + cur_progress + ', issues completed: ' + str(issue_count))
 
     @classmethod
     def strip_tz_get_pd_timestamp(cls, iso_datetime_with_tz):
