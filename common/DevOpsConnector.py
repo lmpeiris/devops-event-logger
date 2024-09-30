@@ -15,8 +15,8 @@ class DevOpsConnector:
         self.event_logs = []
         self.event_counter = 0
 
-    def add_event(self, event_id, action, time, case, user, user_ref, local_case, info1: str = '', info2: str = '')\
-            -> dict:
+    def add_event(self, event_id, action, time, case, user, user_ref, local_case, info1: str = '', info2: str = '',
+                  ns: str = '') -> dict:
         """Appends an event to event queue, there is no unique validation here.
         If needed use the return as well to get event dict in standard form"""
         fields_ok = True
@@ -29,11 +29,13 @@ class DevOpsConnector:
             #  this function will only hash user_ref
             # adding to dump later as a user reference from all events
             self.user_ref[str(user)] = str(user_ref)
-            # note: none of these id values have a continous function meaning, hence str
+            if ns == '':
+                ns = self.namespace
+            # note: none of these id values have a continuous function meaning, hence str
             event_dict = {'id': str(event_id), 'action': str(action),
                           'time': str(time), 'case': str(case),
                           'user': str(user), 'local_case': local_case,
-                          'info1': info1, 'info2': info2, 'ns': str(self.namespace)}
+                          'info1': info1, 'info2': info2, 'ns': str(ns)}
             self.event_logs.append(event_dict)
             self.event_counter += 1
             return event_dict
@@ -43,5 +45,6 @@ class DevOpsConnector:
         for method in event_get_method_list:
             getattr(self, method)(prod_run)
         return self.event_logs
+
 
 

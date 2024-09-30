@@ -4,6 +4,7 @@ import time
 from jiraConnector import JiraConnector
 import json
 import logging.config
+import xmltodict
 
 
 if __name__ == '__main__':
@@ -13,10 +14,10 @@ if __name__ == '__main__':
         settings = json.load(settings_file)['jira']
     # Export jira issue csv with all fields using jira UI itself
     # Note: put 'r' prefix below for windows paths when using absolute path.
-    # Not needed for linux paths or relative paths
-    # WARNING: CSV export is known to skip tracks in fields when csv is decoded
+    # WARNING: CSV export is known to skip tracks in fields when csv is decoded. Using xml output is recommended
     # when running via container, need to mount the folder
-    jira_issue_csv = 'input/jira_issue.csv'
+    jira_issue_source_type = 'xml'
+    jira_issue_source = 'input/jira_rss_xml.xml'
     # TODO: by default jira can only export 1000 issues to csv. Ok for projects with less than that
     #  You may use time query to generate multiple csvs and combine
     #  or use python-jira https://jira.readthedocs.io/api.html#jira.client.JIRA.search_issues
@@ -40,14 +41,32 @@ if __name__ == '__main__':
     logging.config.fileConfig('../common/logging.conf')
     logger = logging.getLogger('scriptLogger')
     # load jira issues
-    issue_df = pd.read_csv(jira_issue_csv, index_col='Issue key', usecols=jira_issue_columns)
-
+    issue_df = pd.DataFrame()
+    # strftime conversion, see https://strftime.org/
+    time_format = '%d/%b/%y %I:%M %p'
+    if jira_issue_source_type == 'csv':
+        issue_df = pd.read_csv(jira_issue_source, index_col='Issue key', usecols=jira_issue_columns)
+    else:
+        with open(jira_issue_source) as xml_source:
+            jira_xml = xmltodict.parse(xml_source.read())
+        issue_list = []
+        issue_index = []
+        for issue in jira_xml['rss']['channel']['item']:
+            if 'parent' in issue:
+                parent = issue['parent']['#text']
+            else:
+                parent = 'na'
+            issue_index.append(issue['key']['#text'])
+            issue_list.append({'Reporter Id': issue['reporter']['@accountid'], 'Reporter': issue['reporter']['#text'],
+                               'Issue Type': issue['type']['#text'], 'Parent': parent,
+                               'Issue id': issue['key']['@id'], 'Created': issue['created'],
+                               'Project key': issue['project']['@key']})
+        issue_df = pd.DataFrame(issue_list, index=issue_index)
+        time_format = '%a, %d %b %Y %H:%M:%S %z'
     # testing with small dataset
     # issue_df = issue_df.iloc[0:2]
 
-    # set proper time format
-    for i in ['Created', 'Updated', 'Resolved']:
-        issue_df[i] = pd.to_datetime(issue_df[i], format='%d/%b/%y %I:%M %p')
+    issue_df['Created'] = pd.to_datetime(issue_df['Created'], format=time_format)
     logger.info('======== Loaded issues: ===========')
     logger.info(issue_df.info)
 

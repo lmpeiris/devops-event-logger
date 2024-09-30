@@ -20,6 +20,10 @@ class JiraConnector(DevOpsConnector):
         self.logger.info('Jira base url: ' + jira_url)
         # this is not user_ref; this gives email for jira id (reverse)
         self.jira_id_email = {}
+        # input - issue iid, out - case id
+        self.issue_case_id = {}
+        # use this for referencing issues internally
+        self.issue_df = pd.DataFrame()
 
     def request(self, url_suffix, method: str = "GET", payload: dict = None, params: dict = None) -> dict:
         """Request sending method with error checking and logging integrated"""
@@ -53,12 +57,17 @@ class JiraConnector(DevOpsConnector):
             user_email = self.jira_id_email[jira_account_id]
         else:
             url_suffix = '/rest/api/3/user'
+            self.logger.debug('Getting email for account: ' + str(jira_account_id))
             response = self.get_data(url_suffix, {'accountId': jira_account_id})
-            user_email = response['emailAddress']
+            if 'emailAddress' in response:
+                user_email = response['emailAddress']
+            else:
+                self.logger.warn('Email not found for account id: ' + str(jira_account_id))
+                user_email = jira_account_id
             self.jira_id_email[jira_account_id] = user_email
         return user_email
 
-    def get_change_log_per_issue(self, issue_key, case_id) -> list[dict]:
+    def get_change_log_per_issue(self, issue_key) -> list[dict]:
         """get changelog history via call to /rest/api/3/issue"""
         self.logger.set_prefix([issue_key])
         self.event_counter = 0
@@ -87,14 +96,16 @@ class JiraConnector(DevOpsConnector):
                         case 'timespent':
                             action = 'jira_time_logged'
                     if action != '':
-                        self.add_event(event_id, action, event_time, case_id, user_email, display_name, issue_key)
+                        ns = self.issue_df.at[issue_key, 'Project key']
+                        self.add_event(event_id, action, event_time, self.issue_case_id[issue_key], user_email,
+                                       display_name, issue_key, '', '', ns)
         except KeyError as e:
             self.logger.error('KeyError occured: ' + str(e))
             traceback.print_exc()
         self.logger.info('number of change log related events found: ' + str(self.event_counter))
         return self.event_logs
 
-    def get_comments_per_issue(self, issue_key, case_id) -> list[dict]:
+    def get_comments_per_issue(self, issue_key) -> list[dict]:
         """Get comment details for a given issue via /rest/api/3/issue/"""
         self.logger.set_prefix([issue_key])
         self.event_counter = 0
@@ -114,7 +125,9 @@ class JiraConnector(DevOpsConnector):
                 display_name = event['author']['displayName']
                 event_time = self.strip_tz_get_pd_timestamp(event['created'])
                 action = 'jira_commented'
-                self.add_event(event_id, action, event_time, case_id, user_email, display_name, issue_key)
+                ns = self.issue_df.at[issue_key, 'Project key']
+                self.add_event(event_id, action, event_time, self.issue_case_id[issue_key], user_email, display_name,
+                               issue_key, '', '', ns)
 
         except KeyError as e:
             print('[ERROR] KeyError occured: ' + str(e))
@@ -126,6 +139,8 @@ class JiraConnector(DevOpsConnector):
         issue_count = 0
         # remove any missing values with 'na' in parent field
         issue_df["Parent"] = issue_df["Parent"].fillna('na')
+        # set dataframe as object property for easy referring
+        self.issue_df = issue_df
         for jira_issue_key in issue_df.index:
             issue_count = issue_count + 1
             time.sleep(self.api_delay)
@@ -138,6 +153,7 @@ class JiraConnector(DevOpsConnector):
             epic_parent = row['Parent']
             issue_id = row['Issue id']
             event_time = row['Created']
+            ns = row['Project key']
             user_email = self.get_email_by_account_id(account_id)
             # Note: id field should be kept as string object for compatibility with hashes
             # epic case detection logic
@@ -146,12 +162,13 @@ class JiraConnector(DevOpsConnector):
             if epic_parent != 'na':
                 case_id = epic_parent
                 action = 'jira_sub_created'
+            self.issue_case_id[jira_issue_key] = case_id
             self.add_event(str(issue_id), action, event_time, case_id,
-                           user_email, display_name, jira_issue_key, issue_type)
+                           user_email, display_name, jira_issue_key, issue_type, '', ns)
             # get events from changelog
-            self.get_change_log_per_issue(jira_issue_key, case_id)
+            self.get_change_log_per_issue(jira_issue_key)
             # get comment events
-            self.get_comments_per_issue(jira_issue_key, case_id)
+            self.get_comments_per_issue(jira_issue_key)
             cur_progress = str(len(self.event_logs))
             self.logger.info('Events found so far ' + cur_progress + ', issues completed: ' + str(issue_count))
 
