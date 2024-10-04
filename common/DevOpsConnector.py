@@ -16,7 +16,7 @@ class DevOpsConnector:
         self.event_counter = 0
 
     def add_event(self, event_id, action, time, case, user, user_ref, local_case, info1: str = '', info2: str = '',
-                  ns: str = '') -> dict:
+                  ns: str = '', duration: int = 0) -> dict:
         """Appends an event to event queue, there is no unique validation here.
         If needed use the return as well to get event dict in standard form"""
         fields_ok = True
@@ -35,7 +35,7 @@ class DevOpsConnector:
             event_dict = {'id': str(event_id), 'action': str(action),
                           'time': str(time), 'case': str(case),
                           'user': str(user), 'local_case': local_case,
-                          'info1': info1, 'info2': info2, 'ns': str(ns)}
+                          'info1': info1, 'info2': info2, 'ns': str(ns), 'duration': duration}
             self.event_logs.append(event_dict)
             self.event_counter += 1
             return event_dict

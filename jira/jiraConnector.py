@@ -86,6 +86,7 @@ class JiraConnector(DevOpsConnector):
                     user_email = self.get_email_by_account_id(account_id)
                 action = ''
                 for item in event['items']:
+                    duration = 0
                     match item['field']:
                         case 'assignee':
                             action = 'jira_assigned'
@@ -95,10 +96,14 @@ class JiraConnector(DevOpsConnector):
                             action = 'jira_' + item['toString']
                         case 'timespent':
                             action = 'jira_time_logged'
+                            from_dur = 0
+                            if item['from'] is not None:
+                                from_dur = int(item['from'])
+                            duration = int(int(item['to']) - from_dur)
                     if action != '':
                         ns = self.issue_df.at[issue_key, 'Project key']
                         self.add_event(event_id, action, event_time, self.issue_case_id[issue_key], user_email,
-                                       display_name, issue_key, '', '', ns)
+                                       display_name, issue_key, '', '', ns, duration)
         except KeyError as e:
             self.logger.error('KeyError occured: ' + str(e))
             traceback.print_exc()

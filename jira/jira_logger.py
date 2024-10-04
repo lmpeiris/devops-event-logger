@@ -57,10 +57,14 @@ if __name__ == '__main__':
             else:
                 parent = 'na'
             issue_index.append(issue['key']['#text'])
+            if 'timespent' in issue:
+                timespent = int(issue['timespent']['@seconds'])
+            else:
+                timespent = 0
             issue_list.append({'Reporter Id': issue['reporter']['@accountid'], 'Reporter': issue['reporter']['#text'],
                                'Issue Type': issue['type']['#text'], 'Parent': parent,
                                'Issue id': issue['key']['@id'], 'Created': issue['created'],
-                               'Project key': issue['project']['@key']})
+                               'Project key': issue['project']['@key'], 'timespent': timespent})
         issue_df = pd.DataFrame(issue_list, index=issue_index)
         time_format = '%a, %d %b %Y %H:%M:%S %z'
     # testing with small dataset
