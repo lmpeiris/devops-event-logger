@@ -22,6 +22,8 @@ class JiraConnector(DevOpsConnector):
         self.jira_id_email = {}
         # input - issue iid, out - case id
         self.issue_case_id = {}
+        # input - issue iid, out - list of comments, if available
+        self.issue_comment_list = {}
         # use this for referencing issues internally
         self.issue_df = pd.DataFrame()
 
@@ -140,7 +142,7 @@ class JiraConnector(DevOpsConnector):
         self.logger.info('number of comments related events found: ' + str(self.event_counter))
         return self.event_logs
 
-    def iterate_issues(self, issue_df: pandas.core.frame.DataFrame):
+    def iterate_issues(self, issue_df: pandas.core.frame.DataFrame, issue_df_column_mapping: dict):
         issue_count = 0
         # remove any missing values with 'na' in parent field
         issue_df["Parent"] = issue_df["Parent"].fillna('na')
@@ -149,27 +151,23 @@ class JiraConnector(DevOpsConnector):
         for jira_issue_key in issue_df.index:
             issue_count = issue_count + 1
             time.sleep(self.api_delay)
-            # add entry for create event
+            # reading each issue from source in to row
             row = issue_df.loc[jira_issue_key]
-            # TODO: read from configmap
-            account_id = row['Reporter Id']
-            display_name = row['Reporter']
-            issue_type = row['Issue Type']
-            epic_parent = row['Parent']
-            issue_id = row['Issue id']
-            event_time = row['Created']
-            ns = row['Project key']
-            user_email = self.get_email_by_account_id(account_id)
+            # mapped column is read to dict j. This is done to standardize column names
+            j = {}
+            for i in issue_df_column_mapping:
+                j[i] = row[issue_df_column_mapping[i]]
+            user_email = self.get_email_by_account_id(j['account_id'])
             # Note: id field should be kept as string object for compatibility with hashes
             # epic case detection logic
             case_id = jira_issue_key
             action = 'jira_created'
-            if epic_parent != 'na':
-                case_id = epic_parent
+            if j['epic_parent'] != 'na':
+                case_id = j['epic_parent']
                 action = 'jira_sub_created'
             self.issue_case_id[jira_issue_key] = case_id
-            self.add_event(str(issue_id), action, event_time, case_id,
-                           user_email, display_name, jira_issue_key, issue_type, '', ns)
+            self.add_event(str(j['issue_id']), action, j['event_time'], case_id,
+                           user_email, j['display_name'], jira_issue_key, j['issue_type'], '', j['ns'])
             # get events from changelog
             self.get_change_log_per_issue(jira_issue_key)
             # get comment events

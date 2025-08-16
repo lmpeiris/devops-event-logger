@@ -2,6 +2,19 @@
   "jira": {
     "issue_columns": ["Issue key", "Issue id", "Reporter Id", "Created", "Updated", "Resolved", "Parent", "Issue Type",
       "Reporter", "Project key"],
-    "get_all_events_order": ["get_all_events"]
+    "get_all_events_order": ["get_all_events"],
+    "issue_source": {
+      "type": "xml",
+      "path": "input/jira_rss_xml.xml"
+    },
+    "issue_df_column_mapping": {
+            "account_id": "Reporter Id",
+            "display_name": "Reporter",
+            "issue_type": "Issue Type",
+            "epic_parent": "Parent",
+            "issue_id": "Issue id",
+            "event_time": "Created",
+            "ns": "Project key"
+    }
   }
 }

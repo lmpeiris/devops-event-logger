@@ -16,8 +16,8 @@ if __name__ == '__main__':
     # Note: put 'r' prefix below for windows paths when using absolute path.
     # WARNING: CSV export is known to skip tracks in fields when csv is decoded. Using xml output is recommended
     # when running via container, need to mount the folder
-    jira_issue_source_type = 'xml'
-    jira_issue_source = 'input/jira_rss_xml.xml'
+    jira_issue_source_type = settings['issue_source']['type']
+    jira_issue_source = settings['issue_source']['path']
     # TODO: by default jira can only export 1000 issues to csv. Ok for projects with less than that
     #  You may use time query to generate multiple csvs and combine
     #  or use python-jira https://jira.readthedocs.io/api.html#jira.client.JIRA.search_issues
@@ -47,6 +47,7 @@ if __name__ == '__main__':
     if jira_issue_source_type == 'csv':
         issue_df = pd.read_csv(jira_issue_source, index_col='Issue key', usecols=jira_issue_columns)
     else:
+        # TODO: both get issue api and xml provide reliable comment list. Get the info from there
         with open(jira_issue_source) as xml_source:
             jira_xml = xmltodict.parse(xml_source.read())
         issue_list = []
@@ -81,7 +82,7 @@ if __name__ == '__main__':
     logger.info('======== Jira api calls starting : ===========')
     jira_connector = JiraConnector(jira_url, auth_token, 'default', auth_email)
     jira_connector.user_ref = user_info_dict
-    jira_connector.iterate_issues(issue_df)
+    jira_connector.iterate_issues(issue_df, settings['issue_df_column_mapping'])
     # create df
     event_df = pd.DataFrame(jira_connector.event_logs)
     # use pm4py.format_dataframe and then pm4py.convert_to_event_log to convert this to an event log
