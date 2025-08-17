@@ -36,6 +36,7 @@ class JiraConnector(DevOpsConnector):
             if response.status_code > 399:
                 self.logger.warn('received error code ' + str(response.status_code) + ' when calling ' + request_url)
                 self.logger.warn(response.text)
+                return {}
             else:
                 return json.loads(response.text)
         except:
@@ -121,6 +122,10 @@ class JiraConnector(DevOpsConnector):
         self.logger.set_prefix([issue_key])
         url_suffix = '/rest/api/3/issue/' + issue_key
         issue = self.get_data(url_suffix)
+        # skip if response is empty (aka problem with issue)
+        if issue == {}:
+            self.logger.error('Issue data cannot be retrieved: ' + issue_key)
+            return
         try:
             # issue key is the jira project_key - number format string
             ns = issue['fields']['project']['key']
