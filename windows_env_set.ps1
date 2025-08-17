@@ -24,6 +24,8 @@ $env:GITLAB_ID_EMAIL_CSV='None'
 $env:JIRA_PARQUET_SUFFIX='ABCD'
 # delay in seconds between api calls for issues
 $env:JIRA_API_DELAY='1'
+# false is good for a test run, with only partial data is retrieved
+$env:JIRA_PRODUCTION_RUN='True'
 # save user emails to json - will be disabled if data security mode is on
 $env:JIRA_USER_JSON='jira_users.json'
 # jira instance and authentication

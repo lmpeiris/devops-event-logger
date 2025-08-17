@@ -6,15 +6,6 @@
     "issue_source": {
       "type": "xml",
       "path": "input/jira_rss_xml.xml"
-    },
-    "issue_df_column_mapping": {
-            "account_id": "Reporter Id",
-            "display_name": "Reporter",
-            "issue_type": "Issue Type",
-            "epic_parent": "Parent",
-            "issue_id": "Issue id",
-            "event_time": "Created",
-            "ns": "Project key"
     }
   }
 }

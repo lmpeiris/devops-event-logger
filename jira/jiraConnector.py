@@ -1,11 +1,7 @@
 import requests
 import json
 from requests.auth import HTTPBasicAuth
-import datetime
-import pandas as pd
-import pandas.core.frame
 import traceback
-import time
 import sys
 sys.path.insert(0, '../common')
 from DevOpsConnector import DevOpsConnector
@@ -18,14 +14,14 @@ class JiraConnector(DevOpsConnector):
         self.headers = {"Accept": "application/json"}
         self.jira_url = jira_url
         self.logger.info('Jira base url: ' + jira_url)
+        # pandas convertible issue list
+        self.issue_list = []
         # this is not user_ref; this gives email for jira id (reverse)
         self.jira_id_email = {}
         # input - issue iid, out - case id
         self.issue_case_id = {}
-        # input - issue iid, out - list of comments, if available
-        self.issue_comment_list = {}
-        # use this for referencing issues internally
-        self.issue_df = pd.DataFrame()
+        # input - issue iid, out - ns
+        self.issue_ns = {}
 
     def request(self, url_suffix, method: str = "GET", payload: dict = None, params: dict = None) -> dict:
         """Request sending method with error checking and logging integrated"""
@@ -69,7 +65,7 @@ class JiraConnector(DevOpsConnector):
             self.jira_id_email[jira_account_id] = user_email
         return user_email
 
-    def get_change_log_per_issue(self, issue_key) -> list[dict]:
+    def get_change_log_per_issue(self, issue_key: str) -> list[dict]:
         """get changelog history via call to /rest/api/3/issue"""
         self.logger.set_prefix([issue_key])
         self.event_counter = 0
@@ -78,7 +74,7 @@ class JiraConnector(DevOpsConnector):
         try:
             for event in response['values']:
                 event_id = str(event['id'])
-                event_time = self.strip_tz_get_pd_timestamp(event['created'])
+                event_time = event['created']
                 display_name = event['author']['displayName']
                 # emailAddress may not always be provided
                 if 'emailAddress' in event['author']:
@@ -103,16 +99,15 @@ class JiraConnector(DevOpsConnector):
                                 from_dur = int(item['from'])
                             duration = int(int(item['to']) - from_dur)
                     if action != '':
-                        ns = self.issue_df.at[issue_key, 'Project key']
                         self.add_event(event_id, action, event_time, self.issue_case_id[issue_key], user_email,
-                                       display_name, issue_key, '', '', ns, duration)
+                                       display_name, issue_key, '', '', self.issue_ns[issue_key], duration)
         except KeyError as e:
             self.logger.error('KeyError occured: ' + str(e))
             traceback.print_exc()
         self.logger.info('number of change log related events found: ' + str(self.event_counter))
         return self.event_logs
 
-    def get_comments_per_issue(self, issue_key) -> list[dict]:
+    def get_comments_per_issue(self, issue_key: str) -> list[dict]:
         """Get comment details for a given issue via /rest/api/3/issue/"""
         self.logger.set_prefix([issue_key])
         self.event_counter = 0
@@ -130,11 +125,10 @@ class JiraConnector(DevOpsConnector):
                     account_id = event['author']['accountId']
                     user_email = self.get_email_by_account_id(account_id)
                 display_name = event['author']['displayName']
-                event_time = self.strip_tz_get_pd_timestamp(event['created'])
+                event_time = event['created']
                 action = 'jira_commented'
-                ns = self.issue_df.at[issue_key, 'Project key']
                 self.add_event(event_id, action, event_time, self.issue_case_id[issue_key], user_email, display_name,
-                               issue_key, '', '', ns)
+                               issue_key, '', '', self.issue_ns[issue_key])
 
         except KeyError as e:
             print('[ERROR] KeyError occured: ' + str(e))
@@ -142,41 +136,53 @@ class JiraConnector(DevOpsConnector):
         self.logger.info('number of comments related events found: ' + str(self.event_counter))
         return self.event_logs
 
-    def iterate_issues(self, issue_df: pandas.core.frame.DataFrame, issue_df_column_mapping: dict):
+    def iterate_xml_issues(self, jira_xml: dict, prod_run: bool = False):
         issue_count = 0
-        # remove any missing values with 'na' in parent field
-        issue_df["Parent"] = issue_df["Parent"].fillna('na')
-        # set dataframe as object property for easy referring
-        self.issue_df = issue_df
-        for jira_issue_key in issue_df.index:
-            issue_count = issue_count + 1
-            time.sleep(self.api_delay)
-            # reading each issue from source in to row
-            row = issue_df.loc[jira_issue_key]
-            # mapped column is read to dict j. This is done to standardize column names
-            j = {}
-            for i in issue_df_column_mapping:
-                j[i] = row[issue_df_column_mapping[i]]
-            user_email = self.get_email_by_account_id(j['account_id'])
-            # Note: id field should be kept as string object for compatibility with hashes
-            # epic case detection logic
-            case_id = jira_issue_key
+        xml_issues = jira_xml['rss']['channel']['item']
+        if not prod_run:
+            xml_issues = xml_issues[0:20]
+        for issue in xml_issues:
+            issue_count += 1
+            # issue key is the jira project_key - number format string
+            issue_key = issue['key']['#text']
+            ns = issue['project']['@key']
+            case_id = issue_key
             action = 'jira_created'
-            if j['epic_parent'] != 'na':
-                case_id = j['epic_parent']
+            issue_id = str(issue['key']['@id'])
+            issue_created = self.rfc2822_to_iso(issue['created'])
+            issue_type = issue['type']['#text']
+            reporter_email = self.get_email_by_account_id(issue['reporter']['@accountid'])
+            reporter_name = issue['reporter']['#text']
+            if 'parent' in issue:
+                parent = issue['parent']['#text']
+                case_id = parent
                 action = 'jira_sub_created'
-            self.issue_case_id[jira_issue_key] = case_id
-            self.add_event(str(j['issue_id']), action, j['event_time'], case_id,
-                           user_email, j['display_name'], jira_issue_key, j['issue_type'], '', j['ns'])
-            # get events from changelog
-            self.get_change_log_per_issue(jira_issue_key)
-            # get comment events
-            self.get_comments_per_issue(jira_issue_key)
-            cur_progress = str(len(self.event_logs))
-            self.logger.info('Events found so far ' + cur_progress + ', issues completed: ' + str(issue_count))
+            else:
+                parent = 'na'
+            # set issue dict for easy reference
+            self.issue_case_id[issue_key] = case_id
+            self.issue_ns[issue_key] = ns
+            # add jira create event
+            self.add_event(issue_id, action, issue_created, case_id, reporter_email, reporter_name,
+                           issue_key, issue_type, '', ns)
+            if 'timespent' in issue:
+                timespent = int(issue['timespent']['@seconds'])
+            else:
+                timespent = 0
+            # get comment data using api call because xml is not great for lists
+            self.added_event_count()
+            self.get_comments_per_issue(issue_key)
+            comment_count = str(self.added_event_count())
+            # get changelog events using api call
+            self.get_change_log_per_issue(issue_key)
+            # add to issue list
+            self.issue_list.append({'issue_key': issue_key, 'reporter_email': reporter_email,
+                                    'reporter_name': reporter_name,
+                                    'issue_type': issue_type, 'parent': parent,
+                                    'issue_id': issue_id, 'created': issue_created,
+                                    'ns': ns, 'timespent': timespent,
+                                    'comments': comment_count, 'state_changes': str(self.added_event_count())})
+            self.log_status(issue_count)
 
-    @classmethod
-    def strip_tz_get_pd_timestamp(cls, iso_datetime_with_tz):
-        """Converts iso datetime with tz to pandas timestamp, without tz - without time conversions"""
-        #TODO: check whether this messes up the time if jira reports different tz
-        return pd.Timestamp(datetime.datetime.fromisoformat(iso_datetime_with_tz).replace(tzinfo=None))
+
+
