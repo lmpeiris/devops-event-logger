@@ -32,3 +32,7 @@ $env:JIRA_USER_JSON='jira_users.json'
 $env:JIRA_URL='https://xxxxxx.atlassian.net'
 $env:JIRA_AUTH_TOKEN='xxxxxxx'
 $env:JIRA_AUTH_EMAIL='abc@xxx'
+# if using issue source as jira and not xml, define below
+$env:JIRA_PRJ_KEY='MS'
+$env:JIRA_START_KEY='5000'
+$env:JIRA_STOP_KEY='5010'

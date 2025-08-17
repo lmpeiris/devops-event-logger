@@ -18,7 +18,6 @@ if __name__ == '__main__':
     # WARNING: CSV export is known to skip tracks in fields when csv is decoded. Using xml output is recommended
     # when running via container, need to mount the folder
     jira_issue_source_type = settings['issue_source']['type']
-    jira_issue_source = settings['issue_source']['path']
     # TODO: by default jira can only export 1000 issues to csv. Ok for projects with less than that
     #  You may use time query to generate multiple csvs and combine
     #  or use python-jira https://jira.readthedocs.io/api.html#jira.client.JIRA.search_issues
@@ -30,7 +29,7 @@ if __name__ == '__main__':
     # delay in seconds between api calls for issues
     issue_api_delay = float(os.environ['JIRA_API_DELAY'])
     # false is good for a test run, with only partial data is retrieved
-    production_run = LMPUtils.env_bool('GITLAB_PRODUCTION_RUN')
+    production_run = LMPUtils.env_bool('JIRA_PRODUCTION_RUN')
     # save user emails to json - will be disabled if data security mode is on
     user_json = os.environ['JIRA_USER_JSON']
 
@@ -57,11 +56,22 @@ if __name__ == '__main__':
     issue_count = 0
     if jira_issue_source_type == 'xml':
         # TODO: both get issue api and xml provide reliable comment list. Get the info from there
+        jira_issue_source = settings['issue_source']['path']
         with open(jira_issue_source) as xml_source:
             jira_xml = xmltodict.parse(xml_source.read())
             jira_connector.iterate_xml_issues(jira_xml, production_run)
-        issue_df = pd.DataFrame(jira_connector.issue_list)
+    else:
+        jira_project_key = os.environ['JIRA_PRJ_KEY']
+        jira_issue_start = int(os.environ['JIRA_START_KEY'])
+        jira_issue_end = int(os.environ['JIRA_STOP_KEY'])
+        issue_key_list = []
+        for i in range(jira_issue_start, jira_issue_end + 1):
+            issue_key_list.append(jira_project_key + '-' + str(i))
+        logger.info('Number of issues to be read: ' + str(len(issue_key_list)))
+        for issue_key in issue_key_list:
+            jira_connector.get_issue_via_api(issue_key)
 
+    issue_df = pd.DataFrame(jira_connector.issue_list)
     # remove any missing values with 'na' in parent field
     issue_df['parent'] = issue_df['parent'].fillna('na')
     # convert time fields accordingly. We will be using datetime64[ns] throughout, without tz info for performance

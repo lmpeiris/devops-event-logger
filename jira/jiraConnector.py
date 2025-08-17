@@ -68,7 +68,6 @@ class JiraConnector(DevOpsConnector):
     def get_change_log_per_issue(self, issue_key: str) -> list[dict]:
         """get changelog history via call to /rest/api/3/issue"""
         self.logger.set_prefix([issue_key])
-        self.event_counter = 0
         url_suffix = '/rest/api/3/issue/' + issue_key + '/changelog'
         response = self.get_data(url_suffix)
         try:
@@ -98,23 +97,79 @@ class JiraConnector(DevOpsConnector):
                             if item['from'] is not None:
                                 from_dur = int(item['from'])
                             duration = int(int(item['to']) - from_dur)
+                        case 'Key':
+                            action = "jira_prj_changed"
                     if action != '':
                         self.add_event(event_id, action, event_time, self.issue_case_id[issue_key], user_email,
                                        display_name, issue_key, '', '', self.issue_ns[issue_key], duration)
         except KeyError as e:
             self.logger.error('KeyError occured: ' + str(e))
             traceback.print_exc()
-        self.logger.info('number of change log related events found: ' + str(self.event_counter))
         return self.event_logs
 
     def get_comments_per_issue(self, issue_key: str) -> list[dict]:
         """Get comment details for a given issue via /rest/api/3/issue/"""
         self.logger.set_prefix([issue_key])
-        self.event_counter = 0
         url_suffix = '/rest/api/3/issue/' + issue_key + '/comment'
         response = self.get_data(url_suffix)
+        # iterate through comments
+        self.iterate_comments(response['comments'], issue_key)
+        return self.event_logs
+
+    def get_issue_via_api(self, issue_key: str):
+        """Get comment details for a given issue via /rest/api/3/issue/{issueIdOrKey}"""
+        self.logger.set_prefix([issue_key])
+        url_suffix = '/rest/api/3/issue/' + issue_key
+        issue = self.get_data(url_suffix)
         try:
-            for event in response['comments']:
+            # issue key is the jira project_key - number format string
+            ns = issue['fields']['project']['key']
+            case_id = issue_key
+            action = 'jira_created'
+            issue_id = str(issue['id'])
+            issue_created = issue['fields']['created']
+            issue_type = issue['fields']['issuetype']['name']
+            reporter_email = issue['fields']['creator']['emailAddress']
+            reporter_name = issue['fields']['creator']['displayName']
+            if 'parent' in issue['fields']:
+                parent = issue['fields']['parent']['key']
+                case_id = parent
+                action = 'jira_sub_created'
+            else:
+                parent = 'na'
+            # set issue dict for easy reference
+            self.issue_case_id[issue_key] = case_id
+            self.issue_ns[issue_key] = ns
+            timespent = 0
+            if issue['fields']['timetracking'] is not None:
+                if 'timeSpentSeconds' in issue['fields']['timetracking']:
+                    timespent = int(issue['fields']['timetracking']['timeSpentSeconds'])
+            # add jira create event
+            self.add_event(issue_id, action, issue_created, case_id, reporter_email, reporter_name,
+                           issue_key, issue_type, '', ns)
+            # iterate through comments and add, no need to use comments api call for this
+            self.added_event_count()
+            self.iterate_comments(issue['fields']['comment']['comments'], issue_key)
+            comment_count = str(self.added_event_count())
+            self.logger.debug('Comment events added: ' + comment_count)
+            # get changelog events using api call
+            self.get_change_log_per_issue(issue_key)
+            changelog_count = str(self.added_event_count())
+            self.logger.debug('Changelog events added: ' + changelog_count)
+            # add to issue list
+            self.issue_list.append({'issue_key': issue_key, 'reporter_email': reporter_email,
+                                    'reporter_name': reporter_name,
+                                    'issue_type': issue_type, 'parent': parent,
+                                    'issue_id': issue_id, 'created': issue_created,
+                                    'ns': ns, 'timespent': timespent,
+                                    'comments': comment_count, 'state_changes': changelog_count})
+        except KeyError as e:
+            print('[ERROR] KeyError occured: ' + str(e))
+            traceback.print_exc()
+
+    def iterate_comments(self, comment_list: list[dict], issue_key: str):
+        try:
+            for event in comment_list:
                 event_id = str(event['id'])
                 # we do not need bot comments
                 # TODO: this assumption is not always true. put a proper logic to handle
@@ -127,20 +182,19 @@ class JiraConnector(DevOpsConnector):
                 display_name = event['author']['displayName']
                 event_time = event['created']
                 action = 'jira_commented'
-                self.add_event(event_id, action, event_time, self.issue_case_id[issue_key], user_email, display_name,
+                self.add_event(event_id, action, event_time, self.issue_case_id[issue_key], user_email,
+                               display_name,
                                issue_key, '', '', self.issue_ns[issue_key])
-
         except KeyError as e:
             print('[ERROR] KeyError occured: ' + str(e))
             traceback.print_exc()
-        self.logger.info('number of comments related events found: ' + str(self.event_counter))
-        return self.event_logs
 
     def iterate_xml_issues(self, jira_xml: dict, prod_run: bool = False):
+        """Allows to load issues from a xml dump from jira"""
         issue_count = 0
         xml_issues = jira_xml['rss']['channel']['item']
         if not prod_run:
-            xml_issues = xml_issues[0:20]
+            xml_issues = xml_issues[0:10]
         for issue in xml_issues:
             issue_count += 1
             # issue key is the jira project_key - number format string
@@ -173,15 +227,18 @@ class JiraConnector(DevOpsConnector):
             self.added_event_count()
             self.get_comments_per_issue(issue_key)
             comment_count = str(self.added_event_count())
+            self.logger.debug('Comment events added: ' + comment_count)
             # get changelog events using api call
             self.get_change_log_per_issue(issue_key)
+            changelog_count = str(self.added_event_count())
+            self.logger.debug('Changelog events added: ' + changelog_count)
             # add to issue list
             self.issue_list.append({'issue_key': issue_key, 'reporter_email': reporter_email,
                                     'reporter_name': reporter_name,
                                     'issue_type': issue_type, 'parent': parent,
                                     'issue_id': issue_id, 'created': issue_created,
                                     'ns': ns, 'timespent': timespent,
-                                    'comments': comment_count, 'state_changes': str(self.added_event_count())})
+                                    'comments': comment_count, 'state_changes': changelog_count})
             self.log_status(issue_count)
 
 
