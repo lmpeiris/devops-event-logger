@@ -15,7 +15,7 @@ class LMPLogger:
         """Set all arguments as a list"""
         prefix = ''
         for item in arg_list:
-            prefix = prefix + '[' + item + ']'
+            prefix = prefix + '[' + str(item) + ']'
         self.prefix = prefix + ' '
 
     def reset_prefix(self):

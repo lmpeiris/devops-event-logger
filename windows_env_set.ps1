@@ -24,9 +24,15 @@ $env:GITLAB_ID_EMAIL_CSV='None'
 $env:JIRA_PARQUET_SUFFIX='ABCD'
 # delay in seconds between api calls for issues
 $env:JIRA_API_DELAY='1'
+# false is good for a test run, with only partial data is retrieved
+$env:JIRA_PRODUCTION_RUN='True'
 # save user emails to json - will be disabled if data security mode is on
 $env:JIRA_USER_JSON='jira_users.json'
 # jira instance and authentication
 $env:JIRA_URL='https://xxxxxx.atlassian.net'
 $env:JIRA_AUTH_TOKEN='xxxxxxx'
 $env:JIRA_AUTH_EMAIL='abc@xxx'
+# if using issue source as jira and not xml, define below
+$env:JIRA_PRJ_KEY='MS'
+$env:JIRA_START_KEY='5000'
+$env:JIRA_STOP_KEY='5010'

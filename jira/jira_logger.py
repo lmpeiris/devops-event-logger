@@ -1,10 +1,12 @@
 import os
 import pandas as pd
-import time
 from jiraConnector import JiraConnector
 import json
 import logging.config
-
+import xmltodict
+import sys
+sys.path.insert(0, '../common')
+from LMPUtils import LMPUtils
 
 if __name__ == '__main__':
     # ===== configurations ===============
@@ -13,10 +15,9 @@ if __name__ == '__main__':
         settings = json.load(settings_file)['jira']
     # Export jira issue csv with all fields using jira UI itself
     # Note: put 'r' prefix below for windows paths when using absolute path.
-    # Not needed for linux paths or relative paths
-    # WARNING: CSV export is known to skip tracks in fields when csv is decoded
+    # WARNING: CSV export is known to skip tracks in fields when csv is decoded. Using xml output is recommended
     # when running via container, need to mount the folder
-    jira_issue_csv = 'input/jira_issue.csv'
+    jira_issue_source_type = settings['issue_source']['type']
     # TODO: by default jira can only export 1000 issues to csv. Ok for projects with less than that
     #  You may use time query to generate multiple csvs and combine
     #  or use python-jira https://jira.readthedocs.io/api.html#jira.client.JIRA.search_issues
@@ -27,6 +28,8 @@ if __name__ == '__main__':
     jira_issue_columns = settings['issue_columns']
     # delay in seconds between api calls for issues
     issue_api_delay = float(os.environ['JIRA_API_DELAY'])
+    # false is good for a test run, with only partial data is retrieved
+    production_run = LMPUtils.env_bool('JIRA_PRODUCTION_RUN')
     # save user emails to json - will be disabled if data security mode is on
     user_json = os.environ['JIRA_USER_JSON']
 
@@ -39,17 +42,6 @@ if __name__ == '__main__':
     # initialise logger
     logging.config.fileConfig('../common/logging.conf')
     logger = logging.getLogger('scriptLogger')
-    # load jira issues
-    issue_df = pd.read_csv(jira_issue_csv, index_col='Issue key', usecols=jira_issue_columns)
-
-    # testing with small dataset
-    # issue_df = issue_df.iloc[0:2]
-
-    # set proper time format
-    for i in ['Created', 'Updated', 'Resolved']:
-        issue_df[i] = pd.to_datetime(issue_df[i], format='%d/%b/%y %I:%M %p')
-    logger.info('======== Loaded issues: ===========')
-    logger.info(issue_df.info)
 
     # initialize global var
     event_logs = []
@@ -58,9 +50,39 @@ if __name__ == '__main__':
     logger.info('======== Jira api calls starting : ===========')
     jira_connector = JiraConnector(jira_url, auth_token, 'default', auth_email)
     jira_connector.user_ref = user_info_dict
-    jira_connector.iterate_issues(issue_df)
-    # create df
+
+    # load jira issues
+    issue_df = pd.DataFrame()
+    issue_count = 0
+    if jira_issue_source_type == 'xml':
+        # TODO: both get issue api and xml provide reliable comment list. Get the info from there
+        jira_issue_source = settings['issue_source']['path']
+        with open(jira_issue_source) as xml_source:
+            jira_xml = xmltodict.parse(xml_source.read())
+            jira_connector.iterate_xml_issues(jira_xml, production_run)
+    else:
+        jira_project_key = os.environ['JIRA_PRJ_KEY']
+        jira_issue_start = int(os.environ['JIRA_START_KEY'])
+        jira_issue_end = int(os.environ['JIRA_STOP_KEY'])
+        issue_key_list = []
+        for i in range(jira_issue_start, jira_issue_end + 1):
+            issue_key_list.append(jira_project_key + '-' + str(i))
+        logger.info('Number of issues to be read: ' + str(len(issue_key_list)))
+        for issue_key in issue_key_list:
+            jira_connector.get_issue_via_api(issue_key)
+
+    issue_df = pd.DataFrame(jira_connector.issue_list)
+    # remove any missing values with 'na' in parent field
+    issue_df['parent'] = issue_df['parent'].fillna('na')
+    # convert time fields accordingly. We will be using datetime64[ns] throughout, without tz info for performance
+    # if using more than one timezone convert before stripping
+    issue_df['created'] = pd.to_datetime(issue_df['created'], format='ISO8601').dt.tz_localize(None)
+    logger.info('======== Loaded issues: ===========')
+    logger.info(issue_df.info)
+
+    # create event df
     event_df = pd.DataFrame(jira_connector.event_logs)
+    event_df['time'] = pd.to_datetime(event_df['time'], format='ISO8601').dt.tz_localize(None)
     # use pm4py.format_dataframe and then pm4py.convert_to_event_log to convert this to an event log
     # please use utils/process_mining.py for this task
     logger.info('======== Event log data: ===========')
