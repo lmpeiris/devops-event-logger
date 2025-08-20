@@ -20,6 +20,9 @@ def load_user_email_map(file_path_to_file: str, target_dict: dict):
 
 if __name__ == '__main__':
     # ===== configurations ============
+    # read main config
+    with open('../common/settings.json', 'r') as settings_file:
+        settings = json.load(settings_file)['gitlab']
     # read config from environment vars
     gitlab_base_url = os.environ['GITLAB_BASE_URL']
     gitlab_private_token = os.environ['GITLAB_PRIVATE_TOKEN']
@@ -60,7 +63,7 @@ if __name__ == '__main__':
     for project_id in gitlab_project_id_list:
         glc = GitlabConnector(gitlab_base_url, gitlab_private_token, project_id, external_issue_ref_regex)
         glc.user_email_map = user_email_map
-        events = glc.get_all_events(production_run)
+        events = glc.get_all_events(settings['get_all_events_order'], production_run)
         event_logs.extend(events)
         issue_list.extend(glc.issue_list)
         mr_list.extend(glc.mr_list)

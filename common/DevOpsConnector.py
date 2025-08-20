@@ -12,6 +12,8 @@ class DevOpsConnector:
         # --- variable initialization ----
         # input - user (gitlab id or email), out - user ref
         self.user_ref = {}
+        # pandas convertible issue list
+        self.issue_list = []
         # event logs will only keep method scope and should be emptied when new method starts
         self.event_logs = []
         # global event count

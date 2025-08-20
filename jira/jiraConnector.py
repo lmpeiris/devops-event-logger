@@ -14,8 +14,6 @@ class JiraConnector(DevOpsConnector):
         self.headers = {"Accept": "application/json"}
         self.jira_url = jira_url
         self.logger.info('Jira base url: ' + jira_url)
-        # pandas convertible issue list
-        self.issue_list = []
         # this is not user_ref; this gives email for jira id (reverse)
         self.jira_id_email = {}
         # input - issue iid, out - case id
