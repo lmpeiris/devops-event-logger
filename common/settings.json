@@ -5,9 +5,11 @@
     "get_all_events_order": ["get_all_events"],
     "issue_source": {
       "type": "jira"
-    }
+    },
+    "preserve_timezone": false
   },
   "gitlab": {
-    "get_all_events_order": ["get_issues_events", "get_branch_events", "get_mrs_events", "get_commit_events", "get_pipeline_events"]
+    "get_all_events_order": ["get_issues_events", "get_branch_events", "get_mrs_events", "get_commit_events", "get_pipeline_events"],
+    "preserve_timezone": false
   }
 }

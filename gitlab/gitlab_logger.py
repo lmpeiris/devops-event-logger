@@ -72,24 +72,25 @@ if __name__ == '__main__':
         # dictionary merge
         user_dict = {**user_dict, **glc.user_ref}
     logger.info('====== Saving data======')
+    preserve_timezone = settings['preserve_timezone']
     # converting to pandas dataframes
     event_df = pd.DataFrame(event_logs)
     # convert event log to datetime
-    event_df['time'] = pd.to_datetime(event_df['time'], utc=True)
+    event_df['time'] = LMPUtils.iso_to_datetime64(event_df['time'], preserve_timezone)
     # use pm4py.format_dataframe and then pm4py.convert_to_event_log to convert this to an event log
     # please use utils/process_mining.py for this task
     issue_df = pd.DataFrame(issue_list)
     for i in ['created_time', 'updated_time']:
-        issue_df[i] = pd.to_datetime(issue_df[i], utc=True)
+        issue_df[i] = LMPUtils.iso_to_datetime64(issue_df[i], preserve_timezone)
     mr_df = pd.DataFrame(mr_list)
     for i in ['created_time', 'updated_time']:
-        mr_df[i] = pd.to_datetime(mr_df[i], utc=True)
+        mr_df[i] = LMPUtils.iso_to_datetime64(mr_df[i], preserve_timezone)
     commit_df = pd.DataFrame(commit_list)
-    commit_df['created_time'] = pd.to_datetime(commit_df['created_time'], utc=True)
+    commit_df['created_time'] = LMPUtils.iso_to_datetime64(commit_df['created_time'], preserve_timezone)
     # dump pipeline data
     pl_df = pd.DataFrame(pl_list)
     for i in ['created_time', 'updated_time']:
-        pl_df[i] = pd.to_datetime(pl_df[i], utc=True)
+        pl_df[i] = LMPUtils.iso_to_datetime64(pl_df[i], preserve_timezone)
     logger.info('====== event summary ======')
     logger.info(event_df.info())
     logger.info('====== issue summary ======')

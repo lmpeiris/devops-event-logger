@@ -42,6 +42,7 @@ if __name__ == '__main__':
     # initialise logger
     logging.config.fileConfig('../common/logging.conf')
     logger = logging.getLogger('scriptLogger')
+    preserve_timezone = settings['preserve_timezone']
 
     # initialize global var
     event_logs = []
@@ -74,15 +75,14 @@ if __name__ == '__main__':
     issue_df = pd.DataFrame(jira_connector.issue_list)
     # remove any missing values with 'na' in parent field
     issue_df['parent'] = issue_df['parent'].fillna('na')
-    # convert time fields accordingly. We will be using datetime64[ns] throughout, without tz info for performance
-    # if using more than one timezone convert before stripping
-    issue_df['created'] = pd.to_datetime(issue_df['created'], format='ISO8601').dt.tz_localize(None)
+    # set proper timezone settings
+    issue_df['created'] = LMPUtils.iso_to_datetime64(issue_df['created'], preserve_timezone)
     logger.info('======== Loaded issues: ===========')
     logger.info(issue_df.info)
 
     # create event df
     event_df = pd.DataFrame(jira_connector.event_logs)
-    event_df['time'] = pd.to_datetime(event_df['time'], format='ISO8601').dt.tz_localize(None)
+    event_df['time'] = LMPUtils.iso_to_datetime64(event_df['time'], preserve_timezone)
     # use pm4py.format_dataframe and then pm4py.convert_to_event_log to convert this to an event log
     # please use utils/process_mining.py for this task
     logger.info('======== Event log data: ===========')

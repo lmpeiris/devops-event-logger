@@ -1,5 +1,4 @@
 import logging
-import datetime
 from LMPLogger import LMPLogger
 
 
@@ -63,8 +62,3 @@ class DevOpsConnector:
         self.temp_event_count = 0
         return added_count
 
-    @classmethod
-    def rfc2822_to_iso(cls, rfc2822_string: str) -> datetime.datetime:
-        """converts Thu, 26 Sep 2024 09:37:22 +0530 like date to 2024-09-26 09:37:22"""
-        iso_datetime = datetime.datetime.strptime(rfc2822_string, '%a, %d %b %Y %H:%M:%S %z')
-        return iso_datetime

@@ -5,7 +5,7 @@ import traceback
 import sys
 sys.path.insert(0, '../common')
 from DevOpsConnector import DevOpsConnector
-
+from LMPUtils import LMPUtils
 
 class JiraConnector(DevOpsConnector):
     def __init__(self, jira_url, auth_token, namespace, auth_email, api_delay: int = 1):
@@ -206,7 +206,7 @@ class JiraConnector(DevOpsConnector):
             case_id = issue_key
             action = 'jira_created'
             issue_id = str(issue['key']['@id'])
-            issue_created = self.rfc2822_to_iso(issue['created'])
+            issue_created = LMPUtils.rfc2822_to_iso(issue['created'])
             issue_type = issue['type']['#text']
             reporter_email = self.get_email_by_account_id(issue['reporter']['@accountid'])
             reporter_name = issue['reporter']['#text']
