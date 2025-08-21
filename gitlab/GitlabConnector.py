@@ -144,11 +144,12 @@ class GitlabConnector(DevOpsConnector):
 
     def get_pipeline_events(self, prod_run: bool = False) -> list[dict]:
         """Extract pipeline and job events from the repo"""
-        self.event_logs = []
         project = self.project_object
         pipelines = project.pipelines.list(get_all=prod_run)
         self.logger.info('number of pipelines found for project: ' + str(len(pipelines)))
+        pl_counter = 0
         for pipeline in pipelines:
+            pl_counter += 1
             try:
                 # For pipelines, standard is to use global id
                 self.logger.set_arg_only('GLPL-' + str(pipeline.id))
@@ -186,16 +187,16 @@ class GitlabConnector(DevOpsConnector):
                            'author': pl.user['id'], 'created_time': pl.created_at, 'updated_time': pl.updated_at,
                            'duration': duration, 'status': pl.status, 'case_id': case_id, 'project_id': self.project_id}
                 self.pl_list.append(pl_dict)
+                self.log_status(pl_counter, len(pipelines))
             except (TypeError, KeyError):
                 self.logger.error('Error occurred retrieving data for: ' + str(pipeline.id) + ' moving to next.')
                 traceback.print_exc()
             self.logger.reset_prefix()
-        self.logger.info('number of pipeline related events found: ' + str(len(self.event_logs)))
+        self.logger.info('number of pipeline related events found: ' + str(self.added_event_count()))
         return self.event_logs
 
     def get_branch_events(self, prod_run: bool = False) -> list[dict]:
         """Extract branch creation events from repo"""
-        self.event_logs = []
         project = self.project_object
         self.logger.info('scanning branches in project_id: ' + str(self.project_id))
         branches = project.branches.list(get_all=prod_run)
@@ -217,12 +218,11 @@ class GitlabConnector(DevOpsConnector):
             except (TypeError, KeyError):
                 self.logger.error('Error occurred retrieving data for: ' + br.name + ' moving to next.')
                 traceback.print_exc()
-        self.logger.info('number of branch events found: ' + str(len(self.event_logs)))
+        self.logger.info('number of branch events found: ' + str(self.added_event_count()))
         return self.event_logs
 
     def get_commit_events(self, prod_run: bool = False) -> list[dict]:
         """Extract commit events from repo"""
-        self.event_logs = []
         project = self.project_object
         self.logger.info('getting commit list for project id: ' + str(self.project_id))
         # TODO: pulling all commits from repo again is not needed as almost all captured my MRs usually
@@ -244,18 +244,19 @@ class GitlabConnector(DevOpsConnector):
             except (TypeError, KeyError):
                 self.logger.error('Error occurred retrieving data for: ' + str(commit_sha) + ' moving to next.')
                 traceback.print_exc()
-        self.logger.info('number of commit events found: ' + str(len(self.event_logs)))
+        self.logger.info('number of commit events found: ' + str(self.added_event_count()))
         return self.event_logs
 
     def get_mrs_events(self, prod_run: bool = False) -> list[dict]:
         """Extract MR events from repo and analyse relations to issues"""
         self.logger.info('scanning MRs in project_id: ' + str(self.project_id))
-        self.event_logs = []
         merge_commit_regex = re.compile('Merge branch')
         project = self.project_object
         merge_requests = project.mergerequests.list(get_all=prod_run)
         self.logger.info('number of MRs found for project: ' + str(len(merge_requests)))
+        mr_counter = 0
         for mr in merge_requests:
+            mr_counter += 1
             try:
                 self.logger.set_arg_only('MR-' + str(mr.iid))
                 self.logger.debug('reading data for MR')
@@ -320,18 +321,18 @@ class GitlabConnector(DevOpsConnector):
                            'linked_issues': linked, 'mentioned_issues': mentioned, 'case_id': case_id,
                            'link_type': link_type}
                 self.mr_list.append(mr_dict)
+                self.log_status(mr_counter, len(merge_requests))
             except (TypeError, KeyError):
                 self.logger.error('Error occurred retrieving data for: ' + str(mr.iid) + ' moving to next.')
                 traceback.print_exc()
             self.logger.reset_prefix()
-        self.logger.info('number of MR related events found: ' + str(len(self.event_logs)))
+        self.logger.info('number of MR related events found: ' + str(self.added_event_count()))
         return self.event_logs
 
     def get_issues_events(self, prod_run: bool = False) -> list[dict]:
         """Get gitlab issue related events, find relations to MRs and external issues"""
         self.logger.info('scanning issues in project_id: ' + str(self.project_id))
         # --initialising values---
-        self.event_logs = []
         branch_create_regex = re.compile('created branch')
         assigned_regex = re.compile('assigned to')
         mr_regex = re.compile('mentioned in merge request')
@@ -339,8 +340,10 @@ class GitlabConnector(DevOpsConnector):
         project = self.project_object
         issues = project.issues.list(get_all=prod_run)
         self.logger.info('number of issues found for project: ' + str(len(issues)))
+        issue_counter = 0
         for issue in issues:
             try:
+                issue_counter += 1
                 self.logger.set_arg_only('GLI-' + str(issue.iid))
                 linked_mrs = set()
                 mentioned_mrs = set()
@@ -408,11 +411,12 @@ class GitlabConnector(DevOpsConnector):
                               'updated_time': issue.updated_at, 'state': issue.state, 'project_id': issue.project_id,
                               'ext_issue_id': ext_issue_id, 'linked_mrs': linked_mrs, 'mentioned_mrs': mentioned_mrs}
                 self.issue_list.append(issue_dict)
+                self.log_status(issue_counter, len(issues))
             except (TypeError, KeyError):
                 self.logger.error('Error occurred retrieving data for: ' + str(issue.iid) + ' moving to next.')
                 traceback.print_exc()
             self.logger.reset_prefix()
-        self.logger.info('number of issue related events found: ' + str(len(self.event_logs)))
+        self.logger.info('number of issue related events found: ' + str(self.added_event_count()))
         return self.event_logs
 
     @classmethod
