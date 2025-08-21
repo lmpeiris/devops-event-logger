@@ -47,14 +47,18 @@ class DevOpsConnector:
             return event_dict
 
     def get_all_events(self, event_get_method_list: list, prod_run: bool = False) -> list[dict]:
-        """Umbrella method to retrieve all events if event_logs reset is in place"""
+        """Umbrella method to retrieve all events if event_logs reset is NOT in place"""
         for method in event_get_method_list:
             getattr(self, method)(prod_run)
         return self.event_logs
 
-    def log_status(self, current_count):
-        cur_progress = str(len(self.event_logs))
-        self.logger.info('Events found so far ' + cur_progress + ', items completed: ' + str(current_count))
+    def log_status(self, current_count: int, total_count: int = 0):
+        cur_progress = str(self.event_counter)
+        if total_count == 0:
+            completion = str(current_count)
+        else:
+            completion = str(round(current_count / total_count * 100, 2)) + '%'
+        self.logger.info('Events found so far ' + cur_progress + ', items completed: ' + completion)
 
     def added_event_count(self) -> int:
         """Gives event count added from the last time this was called and resets"""

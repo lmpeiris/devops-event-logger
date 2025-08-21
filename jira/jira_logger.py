@@ -54,7 +54,6 @@ if __name__ == '__main__':
 
     # load jira issues
     issue_df = pd.DataFrame()
-    issue_count = 0
     if jira_issue_source_type == 'xml':
         # TODO: both get issue api and xml provide reliable comment list. Get the info from there
         jira_issue_source = settings['issue_source']['path']
@@ -69,8 +68,11 @@ if __name__ == '__main__':
         for i in range(jira_issue_start, jira_issue_end + 1):
             issue_key_list.append(jira_project_key + '-' + str(i))
         logger.info('Number of issues to be read: ' + str(len(issue_key_list)))
+        issue_counter = 0
         for issue_key in issue_key_list:
+            issue_counter += 1
             jira_connector.get_issue_via_api(issue_key)
+            jira_connector.log_status(issue_counter, len(issue_key_list))
 
     issue_df = pd.DataFrame(jira_connector.issue_list)
     # remove any missing values with 'na' in parent field

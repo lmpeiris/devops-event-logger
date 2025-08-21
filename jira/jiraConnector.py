@@ -7,6 +7,7 @@ sys.path.insert(0, '../common')
 from DevOpsConnector import DevOpsConnector
 from LMPUtils import LMPUtils
 
+
 class JiraConnector(DevOpsConnector):
     def __init__(self, jira_url, auth_token, namespace, auth_email, api_delay: int = 1):
         DevOpsConnector.__init__(self, namespace, api_delay)
@@ -64,7 +65,7 @@ class JiraConnector(DevOpsConnector):
             self.jira_id_email[jira_account_id] = user_email
         return user_email
 
-    def get_change_log_per_issue(self, issue_key: str) -> list[dict]:
+    def get_change_log_per_issue(self, issue_key: str) -> dict:
         """get changelog history via call to /rest/api/3/issue"""
         self.logger.set_prefix([issue_key])
         url_suffix = '/rest/api/3/issue/' + issue_key + '/changelog'
@@ -104,26 +105,26 @@ class JiraConnector(DevOpsConnector):
         except KeyError as e:
             self.logger.error('KeyError occured: ' + str(e))
             traceback.print_exc()
-        return self.event_logs
+        return response
 
-    def get_comments_per_issue(self, issue_key: str) -> list[dict]:
+    def get_comments_per_issue(self, issue_key: str) -> dict:
         """Get comment details for a given issue via /rest/api/3/issue/"""
         self.logger.set_prefix([issue_key])
         url_suffix = '/rest/api/3/issue/' + issue_key + '/comment'
         response = self.get_data(url_suffix)
         # iterate through comments
         self.iterate_comments(response['comments'], issue_key)
-        return self.event_logs
+        return response
 
-    def get_issue_via_api(self, issue_key: str):
-        """Get comment details for a given issue via /rest/api/3/issue/{issueIdOrKey}"""
+    def get_issue_via_api(self, issue_key: str) -> dict:
+        """Get issue details for a given issue via /rest/api/3/issue/{issueIdOrKey}"""
         self.logger.set_prefix([issue_key])
         url_suffix = '/rest/api/3/issue/' + issue_key
         issue = self.get_data(url_suffix)
         # skip if response is empty (aka problem with issue)
         if issue == {}:
             self.logger.error('Issue data cannot be retrieved: ' + issue_key)
-            return
+            return issue
         try:
             # issue key is the jira project_key - number format string
             ns = issue['fields']['project']['key']
@@ -169,6 +170,7 @@ class JiraConnector(DevOpsConnector):
         except KeyError as e:
             print('[ERROR] KeyError occured: ' + str(e))
             traceback.print_exc()
+        return issue
 
     def iterate_comments(self, comment_list: list[dict], issue_key: str):
         try:
@@ -194,12 +196,12 @@ class JiraConnector(DevOpsConnector):
 
     def iterate_xml_issues(self, jira_xml: dict, prod_run: bool = False):
         """Allows to load issues from a xml dump from jira"""
-        issue_count = 0
+        issue_counter = 0
         xml_issues = jira_xml['rss']['channel']['item']
         if not prod_run:
             xml_issues = xml_issues[0:10]
         for issue in xml_issues:
-            issue_count += 1
+            issue_counter += 1
             # issue key is the jira project_key - number format string
             issue_key = issue['key']['#text']
             ns = issue['project']['@key']
@@ -242,7 +244,7 @@ class JiraConnector(DevOpsConnector):
                                     'issue_id': issue_id, 'created': issue_created,
                                     'ns': ns, 'timespent': timespent,
                                     'comments': comment_count, 'state_changes': changelog_count})
-            self.log_status(issue_count)
+            self.log_status(issue_counter, len(xml_issues))
 
 
 
