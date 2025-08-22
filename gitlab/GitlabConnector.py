@@ -2,7 +2,6 @@
 import gitlab
 import re
 import traceback
-import datetime
 from typing import Literal
 import sys
 sys.path.insert(0, '../common')
@@ -419,32 +418,3 @@ class GitlabConnector(DevOpsConnector):
         self.logger.info('number of issue related events found: ' + str(self.added_event_count()))
         return self.event_logs
 
-    @classmethod
-    def add_link(cls, target_dict: dict, key, value):
-        """lookup dict and add entry to set, else create new set"""
-        if key not in target_dict:
-            # if set does not exist, we create
-            target_dict[key] = {value}
-        else:
-            # else we add
-            target_dict[key].add(value)
-
-    @classmethod
-    def empty_set_or_value(cls, check_dict: dict, key) -> set:
-        """lookup dict and return set value, or else return empty set"""
-        if key not in check_dict:
-            return set()
-        else:
-            return check_dict[key]
-
-    @classmethod
-    def get_max_timed_id(cls, input_ids: set, dt_dict_to_lookup: dict) -> int:
-        """Gives the entity id which has the max date by reading time from a dict"""
-        latest_id = 0
-        latest_time = datetime.datetime.fromisoformat('2000-01-01T00:00:00.000Z')
-        for i in input_ids:
-            itime = datetime.datetime.fromisoformat(dt_dict_to_lookup[i])
-            if itime > latest_time:
-                latest_time = itime
-                latest_id = i
-        return latest_id
