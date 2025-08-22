@@ -1,5 +1,6 @@
 import requests
 import json
+import re
 from requests.auth import HTTPBasicAuth
 import traceback
 import sys
@@ -21,6 +22,18 @@ class JiraConnector(DevOpsConnector):
         self.issue_case_id = {}
         # input - issue iid, out - ns
         self.issue_ns = {}
+        # input - issue iid, out - set of issue mentions
+        self.issue_mentions = {}
+        # regex for finding other jira issue mentions
+        self.jira_issue_regex = re.compile(jira_url + '/browse/[A-Z]{1,9}-\\d+')
+
+    def find_issue_id_mentions(self, input_dict: dict, url_split_number: int = 4) -> list[str]:
+        """Gives list of issue ids found in dict by converting whole thing to json"""
+        json_txt = json.dumps(input_dict)
+        regex_matches = []
+        for match in self.jira_issue_regex.findall(json_txt):
+            regex_matches.append(match.split('/')[url_split_number])
+        return regex_matches
 
     def request(self, url_suffix, method: str = "GET", payload: dict = None, params: dict = None) -> dict:
         """Request sending method with error checking and logging integrated"""
@@ -135,12 +148,11 @@ class JiraConnector(DevOpsConnector):
             issue_type = issue['fields']['issuetype']['name']
             reporter_email = issue['fields']['creator']['emailAddress']
             reporter_name = issue['fields']['creator']['displayName']
+            parent = ''
             if 'parent' in issue['fields']:
                 parent = issue['fields']['parent']['key']
                 case_id = parent
                 action = 'jira_sub_created'
-            else:
-                parent = 'na'
             # set issue dict for easy reference
             self.issue_case_id[issue_key] = case_id
             self.issue_ns[issue_key] = ns
@@ -148,9 +160,13 @@ class JiraConnector(DevOpsConnector):
             if issue['fields']['timetracking'] is not None:
                 if 'timeSpentSeconds' in issue['fields']['timetracking']:
                     timespent = int(issue['fields']['timetracking']['timeSpentSeconds'])
+            # find any issue mentions
+            mentions = self.find_issue_id_mentions(issue['fields']['description'])
+            for mention in mentions:
+                self.add_link(self.issue_mentions, issue_key, mention)
             # add jira create event
             self.add_event(issue_id, action, issue_created, case_id, reporter_email, reporter_name,
-                           issue_key, issue_type, '', ns)
+                           issue_key, issue_type, parent, ns)
             # iterate through comments and add, no need to use comments api call for this
             self.added_event_count()
             self.iterate_comments(issue['fields']['comment']['comments'], issue_key)
@@ -160,13 +176,16 @@ class JiraConnector(DevOpsConnector):
             self.get_change_log_per_issue(issue_key)
             changelog_count = str(self.added_event_count())
             self.logger.debug('Changelog events added: ' + changelog_count)
+            # prepare mentions as a set
+            mention_set = self.empty_set_or_value(self.issue_mentions, issue_key)
             # add to issue list
             self.issue_list.append({'issue_key': issue_key, 'reporter_email': reporter_email,
                                     'reporter_name': reporter_name,
                                     'issue_type': issue_type, 'parent': parent,
                                     'issue_id': issue_id, 'created': issue_created,
                                     'ns': ns, 'timespent': timespent,
-                                    'comments': comment_count, 'state_changes': changelog_count})
+                                    'comments': comment_count, 'state_changes': changelog_count,
+                                    'mentions': mention_set})
         except KeyError as e:
             print('[ERROR] KeyError occured: ' + str(e))
             traceback.print_exc()
@@ -186,10 +205,19 @@ class JiraConnector(DevOpsConnector):
                     user_email = self.get_email_by_account_id(account_id)
                 display_name = event['author']['displayName']
                 event_time = event['created']
-                action = 'jira_commented'
+                info1 = ''
+                if 'parentId' in event:
+                    action = 'jira_cm_reply'
+                    info1 = event['parentId']
+                else:
+                    action = 'jira_commented'
+                # find any issue mentions
+                mentions = self.find_issue_id_mentions(event['body'])
+                for mention in mentions:
+                    self.add_link(self.issue_mentions, issue_key, mention)
                 self.add_event(event_id, action, event_time, self.issue_case_id[issue_key], user_email,
                                display_name,
-                               issue_key, '', '', self.issue_ns[issue_key])
+                               issue_key, info1, '', self.issue_ns[issue_key])
         except KeyError as e:
             print('[ERROR] KeyError occured: ' + str(e))
             traceback.print_exc()
@@ -212,22 +240,25 @@ class JiraConnector(DevOpsConnector):
             issue_type = issue['type']['#text']
             reporter_email = self.get_email_by_account_id(issue['reporter']['@accountid'])
             reporter_name = issue['reporter']['#text']
+            parent = ''
             if 'parent' in issue:
                 parent = issue['parent']['#text']
                 case_id = parent
                 action = 'jira_sub_created'
-            else:
-                parent = 'na'
             # set issue dict for easy reference
             self.issue_case_id[issue_key] = case_id
             self.issue_ns[issue_key] = ns
             # add jira create event
             self.add_event(issue_id, action, issue_created, case_id, reporter_email, reporter_name,
-                           issue_key, issue_type, '', ns)
+                           issue_key, issue_type, parent, ns)
             if 'timespent' in issue:
                 timespent = int(issue['timespent']['@seconds'])
             else:
                 timespent = 0
+            # find any issue mentions
+            mentions = self.find_issue_id_mentions(issue['description'])
+            for mention in mentions:
+                self.add_link(self.issue_mentions, issue_key, mention)
             # get comment data using api call because xml is not great for lists
             self.added_event_count()
             self.get_comments_per_issue(issue_key)
@@ -237,13 +268,16 @@ class JiraConnector(DevOpsConnector):
             self.get_change_log_per_issue(issue_key)
             changelog_count = str(self.added_event_count())
             self.logger.debug('Changelog events added: ' + changelog_count)
+            # prepare mentions as a set
+            mention_set = self.empty_set_or_value(self.issue_mentions, issue_key)
             # add to issue list
             self.issue_list.append({'issue_key': issue_key, 'reporter_email': reporter_email,
                                     'reporter_name': reporter_name,
                                     'issue_type': issue_type, 'parent': parent,
                                     'issue_id': issue_id, 'created': issue_created,
                                     'ns': ns, 'timespent': timespent,
-                                    'comments': comment_count, 'state_changes': changelog_count})
+                                    'comments': comment_count, 'state_changes': changelog_count,
+                                    'mentions': mention_set})
             self.log_status(issue_counter, len(xml_issues))
 
 
