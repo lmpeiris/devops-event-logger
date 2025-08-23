@@ -77,6 +77,7 @@ if __name__ == '__main__':
     event_df = pd.DataFrame(event_logs)
     # convert event log to datetime
     event_df['time'] = LMPUtils.iso_to_datetime64(event_df['time'], preserve_timezone)
+    print(event_df)
     # use pm4py.format_dataframe and then pm4py.convert_to_event_log to convert this to an event log
     # please use utils/process_mining.py for this task
     issue_df = pd.DataFrame(issue_list)

@@ -146,7 +146,12 @@ class JiraConnector(DevOpsConnector):
             issue_id = str(issue['id'])
             issue_created = issue['fields']['created']
             issue_type = issue['fields']['issuetype']['name']
-            reporter_email = issue['fields']['creator']['emailAddress']
+            # emailAddress may not always be provided
+            if 'emailAddress' in issue['fields']['creator']:
+                reporter_email = issue['fields']['creator']['emailAddress']
+            else:
+                account_id = issue['fields']['creator']['accountId']
+                reporter_email = self.get_email_by_account_id(account_id)
             reporter_name = issue['fields']['creator']['displayName']
             parent = ''
             if 'parent' in issue['fields']:

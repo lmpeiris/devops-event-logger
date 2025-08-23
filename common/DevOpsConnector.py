@@ -1,5 +1,6 @@
 import logging
 import datetime
+import re
 from LMPLogger import LMPLogger
 
 
@@ -20,14 +21,16 @@ class DevOpsConnector:
         self.event_counter = 0
         # temp event count, calling added_event_count method will reset it
         self.temp_event_count = 0
+        # iso 8601 regex
+        self.iso8601_re = re.compile(r'\d{4}-\d{2}-\d{2}T')
 
-    def add_event(self, event_id, action, time, case, user, user_ref, local_case, info1: str = '', info2: str = '',
+    def add_event(self, event_id, action, iso8601_time, case, user, user_ref, local_case, info1: str = '', info2: str = '',
                   ns: str = '', duration: int = 0) -> dict:
         """Appends an event to event queue, there is no unique validation here.
         If needed use the return as well to get event dict in standard form"""
         fields_ok = True
         # carry out None checks
-        for i in event_id, action, time, case, user, user_ref, local_case:
+        for i in event_id, action, iso8601_time, case, user, user_ref, local_case:
             if i is None:
                 fields_ok = False
         if fields_ok:
@@ -37,9 +40,14 @@ class DevOpsConnector:
             self.user_ref[str(user)] = str(user_ref)
             if ns == '':
                 ns = self.namespace
+            # check whether time is in iso8601 format, and is a time and not a date
+            time = str(iso8601_time)
+            if not self.iso8601_re.search(time):
+                self.logger.warn(action + ' event rejected as not a valid iso8601 datetime: ' + time)
+                return {}
             # note: none of these id values have a continuous function meaning, hence str
             event_dict = {'id': str(event_id), 'action': str(action),
-                          'time': str(time), 'case': str(case),
+                          'time': time, 'case': str(case),
                           'user': str(user), 'local_case': local_case,
                           'info1': info1, 'info2': info2, 'ns': str(ns), 'duration': duration}
             self.event_logs.append(event_dict)

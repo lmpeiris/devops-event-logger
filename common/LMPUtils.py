@@ -27,11 +27,10 @@ class LMPUtils:
          If not preserve_timezone it will auto-convert to UTC times"""
         if preserve_timezone:
             # user should handle the timezones
+            # pandas may use object type to store if mixed tz input, which may also cause issues with pm4py
             converted_series = pd.to_datetime(series, format='ISO8601')
         else:
             # any other method is risky to follow as events are gathered from multiple sources and teams may be global
             # first convert to UTC, this changes times shown if in a different timezone
-            converted_series = pd.to_datetime(series, format='ISO8601').dt.tz_convert('UTC')
-            # then drop the timezone tag
-            converted_series = converted_series.dt.tz_localize(None)
+            converted_series = pd.to_datetime(series, format='ISO8601', utc=True).dt.tz_localize(None)
         return converted_series
