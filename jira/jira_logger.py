@@ -79,8 +79,8 @@ if __name__ == '__main__':
     issue_df['parent'] = issue_df['parent'].fillna('na')
     # set proper timezone settings
     issue_df['created'] = LMPUtils.iso_to_datetime64(issue_df['created'], preserve_timezone)
-    logger.info('======== Loaded issues: ===========')
-    logger.info(issue_df.info)
+    logger.info('====== issue summary ======')
+    logger.info(issue_df.info())
 
     # create event df
     event_df = pd.DataFrame(jira_connector.event_logs)
@@ -92,6 +92,7 @@ if __name__ == '__main__':
     print(event_df)
     # if getting errors here, install pyarrow
     event_df.to_parquet('jira_event_log_' + parquet_suffix + '.parquet.gz', compression='gzip')
+    issue_df.to_parquet('jira_issues_' + parquet_suffix + '.parquet.gz', compression='gzip')
     # write users to file if enabled
     # TODO: this only collects info from issue reporters - use a object property
     # if user_json is a space avoid writing user file
