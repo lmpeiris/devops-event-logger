@@ -7,6 +7,7 @@ import os
 import sys
 sys.path.insert(0, '../common')
 from LMPUtils import LMPUtils
+from DevOpsConnector import DevOpsConnector
 
 
 def load_user_email_map(file_path_to_file: str, target_dict: dict):
@@ -73,42 +74,26 @@ if __name__ == '__main__':
         user_dict = {**user_dict, **glc.user_ref}
     logger.info('====== Saving data======')
     preserve_timezone = settings['preserve_timezone']
+    # stub devops connector. this is a hack as glc connector is not available outside the loop
+    devops = DevOpsConnector('gitlab', 1)
     # converting to pandas dataframes
     event_df = pd.DataFrame(event_logs)
-    # convert event log to datetime
-    event_df['time'] = LMPUtils.iso_to_datetime64(event_df['time'], preserve_timezone)
-    logger.info('======== Event log data: ===========')
-    print(event_df)
-    logger.info('====== event summary ======')
-    logger.info(event_df.info())
+    devops.publish_df(event_df, ['time'], preserve_timezone,  'event_logs',
+                      'gitlab_event_log_' + parquet_suffix)
     # use pm4py.format_dataframe and then pm4py.convert_to_event_log to convert this to an event log
     # please use utils/process_mining.py for this task
     issue_df = pd.DataFrame(issue_list)
-    for i in ['created_time', 'updated_time']:
-        issue_df[i] = LMPUtils.iso_to_datetime64(issue_df[i], preserve_timezone)
+    devops.publish_df(issue_df, ['created_time', 'updated_time'], preserve_timezone,  'issues',
+                      'gitlab_issues_' + parquet_suffix)
     mr_df = pd.DataFrame(mr_list)
-    for i in ['created_time', 'updated_time']:
-        mr_df[i] = LMPUtils.iso_to_datetime64(mr_df[i], preserve_timezone)
+    devops.publish_df(mr_df, ['created_time', 'updated_time'], preserve_timezone,
+                      'merge requests', 'gitlab_MRs_' + parquet_suffix)
     commit_df = pd.DataFrame(commit_list)
-    commit_df['created_time'] = LMPUtils.iso_to_datetime64(commit_df['created_time'], preserve_timezone)
-    # dump pipeline data
+    devops.publish_df(commit_df, ['created_time'], preserve_timezone,  'commits',
+                      'gitlab_commits_' + parquet_suffix)
     pl_df = pd.DataFrame(pl_list)
-    for i in ['created_time', 'updated_time']:
-        pl_df[i] = LMPUtils.iso_to_datetime64(pl_df[i], preserve_timezone)
-    logger.info('====== issue summary ======')
-    logger.info(issue_df.info())
-    logger.info('====== MR summary ======')
-    logger.info(mr_df.info())
-    logger.info('====== commit summary ======')
-    logger.info(commit_df.info())
-    logger.info('====== pipeline summary ======')
-    logger.info(pl_df.info())
-    # if getting errors here, install pyarrow
-    event_df.to_parquet('gitlab_event_logs_' + parquet_suffix + '.parquet.gz', compression='gzip')
-    issue_df.to_parquet('gitlab_issues_' + parquet_suffix + '.parquet.gz', compression='gzip')
-    mr_df.to_parquet('gitlab_mrs_' + parquet_suffix + '.parquet.gz', compression='gzip')
-    commit_df.to_parquet('gitlab_commits_' + parquet_suffix + '.parquet.gz', compression='gzip')
-    pl_df.to_parquet('gitlab_pipelines_' + parquet_suffix + '.parquet.gz', compression='gzip')
+    devops.publish_df(pl_df, ['created_time', 'updated_time'], preserve_timezone,
+                      'pipelines', 'gitlab_pipelines_' + parquet_suffix)
     # dump user data
     json_file = open(user_json_dump, "w")
     json.dump(user_dict, json_file)

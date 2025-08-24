@@ -1,7 +1,9 @@
 import logging
 import datetime
 import re
+import pandas as pd
 from LMPLogger import LMPLogger
+from LMPUtils import LMPUtils
 
 
 class DevOpsConnector:
@@ -75,6 +77,22 @@ class DevOpsConnector:
         self.temp_event_count = 0
         return added_count
 
+    def publish_df(self, df: pd.DataFrame, time_columns: list,
+                   preserve_timezone: bool, entity_name: str, file_path_name: str):
+        """Gives info and saves dataframe as parquet"""
+        self.logger.set_prefix(['DF', entity_name])
+        self.logger.info('================= ' + entity_name + ' =================')
+        for i in time_columns:
+            self.logger.debug('Transforming time fields in column: ' + i)
+            df[i] = LMPUtils.iso_to_datetime64(df[i], preserve_timezone)
+        self.logger.info('Glance of the records: ')
+        print(df)
+        self.logger.info('Summary: ')
+        print(df.info())
+        parquet_filename = file_path_name + '.parquet.gz'
+        df.to_parquet(parquet_filename, compression='gzip')
+        self.logger.info('Pandas Dataframe written to ' + parquet_filename)
+
     @classmethod
     def add_link(cls, target_dict: dict, key, value):
         """lookup dict and add entry to set, else create new set"""
@@ -104,3 +122,4 @@ class DevOpsConnector:
                 latest_time = itime
                 latest_id = i
         return latest_id
+

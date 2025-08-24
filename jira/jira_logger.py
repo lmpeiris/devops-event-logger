@@ -67,6 +67,8 @@ if __name__ == '__main__':
         issue_key_list = []
         for i in range(jira_issue_start, jira_issue_end + 1):
             issue_key_list.append(jira_project_key + '-' + str(i))
+        if not production_run:
+            issue_key_list = issue_key_list[:20]
         logger.info('Number of issues to be read: ' + str(len(issue_key_list)))
         issue_counter = 0
         for issue_key in issue_key_list:
@@ -77,22 +79,14 @@ if __name__ == '__main__':
     issue_df = pd.DataFrame(jira_connector.issue_list)
     # remove any missing values with 'na' in parent field
     issue_df['parent'] = issue_df['parent'].fillna('na')
-    # set proper timezone settings
-    issue_df['created'] = LMPUtils.iso_to_datetime64(issue_df['created'], preserve_timezone)
-    logger.info('====== issue summary ======')
-    logger.info(issue_df.info())
-
+    jira_connector.publish_df(issue_df, ['created'], preserve_timezone,  'issues',
+                              'jira_issues_' + parquet_suffix)
     # create event df
     event_df = pd.DataFrame(jira_connector.event_logs)
-    event_df['time'] = LMPUtils.iso_to_datetime64(event_df['time'], preserve_timezone)
+    jira_connector.publish_df(event_df, ['time'], preserve_timezone,  'events',
+                              'jira_event_logs_' + parquet_suffix)
     # use pm4py.format_dataframe and then pm4py.convert_to_event_log to convert this to an event log
     # please use utils/process_mining.py for this task
-    logger.info('======== Event log data: ===========')
-    logger.info(event_df.info())
-    print(event_df)
-    # if getting errors here, install pyarrow
-    event_df.to_parquet('jira_event_log_' + parquet_suffix + '.parquet.gz', compression='gzip')
-    issue_df.to_parquet('jira_issues_' + parquet_suffix + '.parquet.gz', compression='gzip')
     # write users to file if enabled
     # TODO: this only collects info from issue reporters - use a object property
     # if user_json is a space avoid writing user file
