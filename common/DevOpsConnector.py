@@ -123,3 +123,46 @@ class DevOpsConnector:
                 latest_id = i
         return latest_id
 
+
+class ALMConnector(DevOpsConnector):
+    def __init__(self, namespace: str, api_delay: int, case_type_prefixes: dict):
+        DevOpsConnector.__init__(self, namespace, api_delay)
+        self.case_type_prefixes = case_type_prefixes
+        # this should be overwritten by subclasses
+        self.project_id = 0
+        # -------------------------------------------
+        # -- dicts for fast ref
+        # -------------------------------------------
+        self.mr_issue_link_dict = {}
+        self.mr_issue_mention_dict = {}
+        self.issue_created_dict = {}
+        self.mr_case_id = {}
+        self.mr_created_dict = {}
+        self.commit_mr_pre_merge_dict = {}
+        self.commit_mr_post_merge_dict = {}
+
+    def generate_case_id(self, value, prefix_type: str) -> str:
+        """Case id will be generated according to case_type_prefixes"""
+        prefix = ''
+        if prefix_type in self.case_type_prefixes:
+            prefix = self.case_type_prefixes[prefix_type]
+        return prefix + '-' + str(self.project_id) + '-' + str(value)
+
+    def find_case_id_for_mr(self, mr_str: str) -> tuple[str, str]:
+        """Get the case id for a given MR. Returns case_id, link_type as tuple"""
+        linked = self.mr_issue_link_dict
+        mentioned = self.mr_issue_mention_dict
+        if (mr_str in linked) and len(linked[mr_str]) > 0:
+            latest_issue = self.get_max_timed_id(linked[mr_str], self.issue_created_dict)
+            case_id = self.generate_case_id(latest_issue, 'issue')
+            link_type = 'mr_link'
+        elif (mr_str in mentioned) and len(mentioned[mr_str]) == 1:
+            issue_iid = next(iter(mentioned[mr_str]))
+            self.logger.warn('linking MR to issue using mentions: ' + mr_str)
+            case_id = self.generate_case_id(issue_iid, 'issue')
+            link_type = 'mr_mention'
+        else:
+            self.logger.warn('no relation found to an issue for MR : ' + mr_str)
+            case_id = self.generate_case_id(mr_str, 'mr')
+            link_type = 'undefined'
+        return case_id, link_type
