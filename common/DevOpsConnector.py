@@ -125,11 +125,12 @@ class DevOpsConnector:
 
 
 class ALMConnector(DevOpsConnector):
-    def __init__(self, namespace: str, api_delay: int, case_type_prefixes: dict):
+    def __init__(self, namespace: str, ext_issue_ref_regex: str, api_delay: int, case_type_prefixes: dict):
         DevOpsConnector.__init__(self, namespace, api_delay)
         self.case_type_prefixes = case_type_prefixes
         # this should be overwritten by subclasses
         self.project_id = 0
+        self.ext_issue_regex = re.compile(ext_issue_ref_regex)
         # -------------------------------------------
         # -- dicts for fast ref
         # -------------------------------------------
@@ -140,6 +141,8 @@ class ALMConnector(DevOpsConnector):
         self.mr_created_dict = {}
         self.commit_mr_pre_merge_dict = {}
         self.commit_mr_post_merge_dict = {}
+        self.commit_info = {}
+        self.commit_mr_commits_dict = {}
 
     def generate_case_id(self, value, prefix_type: str) -> str:
         """Case id will be generated according to case_type_prefixes"""
@@ -166,3 +169,14 @@ class ALMConnector(DevOpsConnector):
             case_id = self.generate_case_id(mr_str, 'mr')
             link_type = 'undefined'
         return case_id, link_type
+
+    def find_ext_issue_id(self, input_text: str) -> str:
+        """Find external system issued ticket id using regex"""
+        # we are considering the first match only
+        result = self.ext_issue_regex.search(input_text)
+        if result is None:
+            return ''
+        else:
+            match = result.group(1)
+            self.logger.debug('found reference to external issue id: ' + match)
+            return match
