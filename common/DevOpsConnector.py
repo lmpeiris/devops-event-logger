@@ -23,8 +23,8 @@ class DevOpsConnector:
         self.event_counter = 0
         # temp event count, calling added_event_count method will reset it
         self.temp_event_count = 0
-        # iso 8601 regex
-        self.iso8601_re = re.compile(r'\d{4}-\d{2}-\d{2}T')
+        # iso 8601 regex, also supporting space instead of T
+        self.iso8601_re = re.compile(r'\d{4}-\d{2}-\d{2}[T ]')
 
     def add_event(self, event_id, action, iso8601_time, case, user, user_ref, local_case, info1: str = '', info2: str = '',
                   ns: str = '', duration: int = 0) -> dict:
@@ -143,6 +143,7 @@ class ALMConnector(DevOpsConnector):
         self.commit_mr_post_merge_dict = {}
         self.commit_info = {}
         self.commit_mr_commits_dict = {}
+        self.mr_list = []
 
     def generate_case_id(self, value, prefix_type: str) -> str:
         """Case id will be generated according to case_type_prefixes"""
