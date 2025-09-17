@@ -30,15 +30,6 @@ class AZDConnector(ALMConnector):
         # this is shortened project id, overides superclass
         self.project_id = project_id[0:7]
 
-    def get_commit_events(self):
-        commits = self.git.get_commits(
-            repository_id=self.project_name,
-            project=self.project_name,
-            search_criteria=None
-        )
-        commit = commits[0]
-        print(commit.as_dict())
-
     def get_mrs_events(self):
         """Extract MR events from repo and analyse relations to issues"""
         self.logger.info('scanning MRs in project_id: ' + str(self.project_name))
@@ -72,6 +63,8 @@ class AZDConnector(ALMConnector):
                 # get data from PR event thread
                 # this reads comments as well as review updates
                 pr_review_regex = re.compile(r'([+-]?\d+)$')
+                pr_complete_regex = re.compile('^.*updated the pull request status to Completed$')
+                pr_abandoned_regex = re.compile('^.*updated the pull request status to Abandoned$')
                 vote_map = {
                     10: "azd_MR_approved",
                     5: "azd_MR_appr_sug",
@@ -86,32 +79,26 @@ class AZDConnector(ALMConnector):
                         comment_created = comment['published_date']
                         comment_author = comment['author']['unique_name']
                         comment_name = comment['author']['display_name']
-                        if 'CodeReviewThreadType' in thread_dict['properties']:
-                            review_score = int(pr_review_regex.search(comment['content']).group(1))
-                            # need to use vote map to identify what has happened, no other way
-                            action = vote_map[review_score]
+                        # log unknown actions for now
+                        action = 'azd_MR_comment_UNKNOWN'
+                        if comment['comment_type'] == 'system':
+                            review_match = pr_review_regex.search(comment['content'])
+                            comp_match = pr_complete_regex.match(comment['content'])
+                            aban_match = pr_abandoned_regex.match(comment['content'])
+                            if review_match is not None:
+                                review_score = int(review_match.group(1))
+                                # need to use vote map to identify what has happened, no other way
+                                action = vote_map[review_score]
+                            elif comp_match is not None:
+                                action = 'azd_MR_completed'
+                            elif aban_match is not None:
+                                action = 'azd_MR_abandoned'
                         elif comment['comment_type'] == 'text':
                             action = 'azd_MR_commented'
-                        else:
-                            # log unknown actions for now
-                            action = 'azd_MR_comment_UNKNOWN'
                             self.logger.warn('Unknown comment type: ' + json.dumps(comment))
                         self.add_event(mr_id, action, comment_created, case_id, comment_author,
                                        comment_name, local_case, '', '', str(self.project_id))
 
-                if 'closed_date' in mr_dict:
-                    closer_email = author_email
-                    closer_name = author_name
-                    # TODO this needs some sample data generation with help of other people
-                    # TODO also add abondon code
-                    if 'closed_by' in mr_dict:
-                        closer_email = mr_dict['closed_by']['unique_name']
-                        closer_name = mr_dict['closed_by']['display_name']
-                    if mr.status == 'completed':
-                        # adding merged event
-                        self.add_event(mr_id, 'azd_MR_merged', mr.merged_at,
-                                       case_id, closer_email, closer_name, local_case, '', '',
-                                       str(self.project_id))
                 pre_merge_commit = mr_dict['last_merge_source_commit']['commit_id']
                 post_merge_commit = mr_dict['last_merge_commit']['commit_id']
                 # adding pre-merge commit
@@ -199,15 +186,35 @@ class AZDConnector(ALMConnector):
                 author_name = fields['System.CreatedBy']['displayName']
                 issue_type = fields['System.WorkItemType']
                 state = fields['System.State']
+                # add event for issue creation
                 self.add_event(case_id, 'azd_issue_created', created_time, case_id, author_email, author_name,
                                case_id, '', '', str(self.project_id))
+                # get all revisions for the issue
+                revisions = self.wit.get_revisions(id=int(issue_id), project=self.project_name, expand='fields')
+                # sort revisions since we need to track state changes
+                revisions.sort(key=lambda r: r.rev)
+                # Loop through revisions to find the differences in the 'System.State' field
+                # TODO: see whether this captures assigning to user
+                for i in range(1, len(revisions)):
+                    current_rev = revisions[i]
+                    previous_rev = revisions[i - 1]
+                    # Direct comparison of the 'System.State' field
+                    current_state = current_rev.fields.get('System.State')
+                    previous_state = previous_rev.fields.get('System.State')
+                    if current_state != previous_state:
+                        self.add_event(case_id + '-' + str(current_rev.rev), 'azd_issue_' + current_state,
+                                       current_rev.fields['System.ChangedDate'], case_id,
+                                       current_rev.fields['System.ChangedBy']['uniqueName'],
+                                       current_rev.fields['System.ChangedBy']['displayName'],
+                                       case_id, '', '', str(self.project_id))
+                # check relations to other entities
                 for x in item.relations:
                     relation = x.as_dict()
                     match relation['attributes']['name']:
                         case 'Parent':
                             url = relation['url']
                             parent_id = url.split('/')[-1]
-                            print(parent_id)
+                            # TODO: is this sub task?
                         case 'Related':
                             if re.search(mention_regex, relation['attributes']['comment']) is not None:
                                 # TODO: add PR mention criteria
