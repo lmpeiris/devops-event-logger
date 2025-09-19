@@ -16,7 +16,8 @@
                   "mr": "MR",
                   "pipeline": "GLPL",
                   "commit": "GLC",
-                  "branch": "GLRF"
+                  "branch": "GLRF",
+                  "action_prefix": "gl"
     }
   },
   "azure_devops": {
@@ -27,7 +28,8 @@
                   "mr": "AZDMR",
                   "pipeline": "AZDPL",
                   "commit": "AZDC",
-                  "branch": "AZDRF"
+                  "branch": "AZDRF",
+                  "action_prefix": "azd"
     }
   }
 }

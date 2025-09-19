@@ -8,7 +8,7 @@ import traceback
 import sys
 import json
 sys.path.insert(0, '../common')
-from DevOpsConnector import ALMConnector
+from ALMConnector import ALMConnector
 
 
 class AZDConnector(ALMConnector):
@@ -54,22 +54,24 @@ class AZDConnector(ALMConnector):
                 self.logger.debug('reading data for MR')
                 case_id, link_type = self.find_case_id_for_mr(mr_id)
                 self.mr_case_id[mr_id] = case_id
-                self.mr_created_dict[mr_id] = mr.creation_date
+                # NOTE: if using as mr.creation_date via library method, it would return a datetime, but we expect str
+                #       no issues for pandas in UTC but some functions fail
+                self.mr_created_dict[mr_id] = mr_dict['creation_date']
                 author_email = mr_dict['created_by']['unique_name']
                 author_name = mr_dict['created_by']['display_name']
                 # create event log for create MR event
-                self.add_event(mr_id, 'azd_MR_created', mr.creation_date, case_id, author_email, author_name,
-                               local_case, '', '', str(self.project_id))
+                self.add_event(mr_id, self.action_prefix + '_MR_created', mr_dict['creation_date'], case_id,
+                               author_email, author_name, local_case, '', '', str(self.project_id))
                 # get data from PR event thread
                 # this reads comments as well as review updates
                 pr_review_regex = re.compile(r'([+-]?\d+)$')
                 pr_complete_regex = re.compile('^.*updated the pull request status to Completed$')
                 pr_abandoned_regex = re.compile('^.*updated the pull request status to Abandoned$')
                 vote_map = {
-                    10: "azd_MR_approved",
-                    5: "azd_MR_appr_sug",
-                    -5: "azd_MR_wait_author",
-                    -10: "azd_MR_rejected"
+                    10: "_MR_approved",
+                    5: "_MR_appr_sug",
+                    -5: "_MR_wait_author",
+                    -10: "_MR_rejected"
                 }
                 mr_threads = self.git.get_threads(repository_id=repo_id, pull_request_id=mr_id,
                                                   project=self.project_name)
@@ -80,7 +82,7 @@ class AZDConnector(ALMConnector):
                         comment_author = comment['author']['unique_name']
                         comment_name = comment['author']['display_name']
                         # log unknown actions for now
-                        action = 'azd_MR_comment_UNKNOWN'
+                        action = self.action_prefix + '_MR_comment_UNKNOWN'
                         if comment['comment_type'] == 'system':
                             review_match = pr_review_regex.search(comment['content'])
                             comp_match = pr_complete_regex.match(comment['content'])
@@ -88,13 +90,13 @@ class AZDConnector(ALMConnector):
                             if review_match is not None:
                                 review_score = int(review_match.group(1))
                                 # need to use vote map to identify what has happened, no other way
-                                action = vote_map[review_score]
+                                action = self.action_prefix + vote_map[review_score]
                             elif comp_match is not None:
-                                action = 'azd_MR_completed'
+                                action = self.action_prefix + '_MR_completed'
                             elif aban_match is not None:
-                                action = 'azd_MR_abandoned'
+                                action = self.action_prefix + '_MR_abandoned'
                         elif comment['comment_type'] == 'text':
-                            action = 'azd_MR_commented'
+                            action = self.action_prefix + '_MR_commented'
                             self.logger.warn('Unknown comment type: ' + json.dumps(comment))
                         self.add_event(mr_id, action, comment_created, case_id, comment_author,
                                        comment_name, local_case, '', '', str(self.project_id))
@@ -140,7 +142,7 @@ class AZDConnector(ALMConnector):
                     mentioned = self.mr_issue_mention_dict[mr_id]
                 # add entry to MR dict
                 mr_dict = {'id': mr_id, 'title': mr.title, 'author_id': author_email,
-                           'created_time': mr.creation_date, 'state': mr.status, 'source_branch': mr.source_ref_name,
+                           'created_time': mr_dict['creation_date'], 'state': mr.status, 'source_branch': mr.source_ref_name,
                            'target_branch': mr.target_ref_name, 'project_id': self.project_name,
                            'ext_issue_id': ext_issue_id, 'linked_issues': linked, 'mentioned_issues': mentioned,
                            'case_id': case_id, 'link_type': link_type}
@@ -187,8 +189,8 @@ class AZDConnector(ALMConnector):
                 issue_type = fields['System.WorkItemType']
                 state = fields['System.State']
                 # add event for issue creation
-                self.add_event(case_id, 'azd_issue_created', created_time, case_id, author_email, author_name,
-                               case_id, '', '', str(self.project_id))
+                self.add_event(case_id, self.action_prefix+ '_issue_created', created_time, case_id, author_email,
+                               author_name, case_id, '', '', str(self.project_id))
                 # get all revisions for the issue
                 revisions = self.wit.get_revisions(id=int(issue_id), project=self.project_name, expand='fields')
                 # sort revisions since we need to track state changes
@@ -202,7 +204,8 @@ class AZDConnector(ALMConnector):
                     current_state = current_rev.fields.get('System.State')
                     previous_state = previous_rev.fields.get('System.State')
                     if current_state != previous_state:
-                        self.add_event(case_id + '-' + str(current_rev.rev), 'azd_issue_' + current_state,
+                        self.add_event(case_id + '-' + str(current_rev.rev),
+                                       self.action_prefix + '_issue_' + current_state,
                                        current_rev.fields['System.ChangedDate'], case_id,
                                        current_rev.fields['System.ChangedBy']['uniqueName'],
                                        current_rev.fields['System.ChangedBy']['displayName'],
