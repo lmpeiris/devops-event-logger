@@ -9,6 +9,7 @@ import sys
 import json
 sys.path.insert(0, '../common')
 from ALMConnector import ALMConnector
+from LMPUtils import LMPUtils
 
 
 class AZDConnector(ALMConnector):
@@ -21,6 +22,7 @@ class AZDConnector(ALMConnector):
         self.core = connection.clients.get_core_client()
         self.git = connection.clients.get_git_client()
         self.wit = connection.clients.get_work_item_tracking_client()
+        self.build = connection.clients.get_build_client()
         self.project = self.core.get_project(project_id=project_name)
         project_id = self.project.id
         self.project_name = project_name
@@ -29,6 +31,60 @@ class AZDConnector(ALMConnector):
         self.logger.info(' Project id is: ' + project_id)
         # this is shortened project id, overides superclass
         self.project_id = project_id[0:7]
+
+    def get_pipeline_events(self):
+        # Get all pipeline definitions in the project
+        definitions = self.build.get_definitions(project=self.project_name)
+        pl_counter = 0
+        for pipeline in definitions:
+            pl_counter += 1
+            try:
+                pl_dict = pipeline.as_dict()
+                pl_id = str(pl_dict['id'])
+                local_case = self.generate_case_id(pl_id, 'pipeline')
+                pl_created = pl_dict['created_date']
+                user_email = pl_dict['authored_by']['unique_name']
+                user_name = pl_dict['authored_by']['display_name']
+                self.logger.set_arg_only(local_case)
+                self.logger.debug('reading data for pipeline')
+                # case id is local id since pl definition is not dependent on commit
+                self.add_event(pl_id, self.action_prefix + '_PL_created', pl_created, local_case, user_email,
+                               user_name, local_case, pl_dict['name'], '', str(self.project_id))
+                # Get the top 5 most recent runs for this pipeline definition
+                builds = self.build.get_builds(project=self.project_name, definitions=[pipeline.id])
+                for run in builds:
+                    b_dict = run.as_dict()
+                    # run id should also include definition id
+                    run_id = str(pl_id) + '-' + str(b_dict['id'])
+                    run_created = b_dict['start_time']
+                    user_email = b_dict['requested_for']['unique_name']
+                    user_name = b_dict['requested_for']['display_name']
+                    run_sha = b_dict['source_version']
+                    local_case = self.generate_case_id(pl_id, 'pipeline')
+                    # commit ids map to the build, not the definition
+                    case_id = self.find_case_id_for_pl(run_sha, run_id)
+                    # run queued event
+                    self.add_event(run_id, self.action_prefix + '_PL_started', run_created, case_id, user_email,
+                                   user_name, local_case, '', '', str(self.project_id))
+                    duration = 0
+                    if 'finish_time' in b_dict:
+                        # add build completed event
+                        run_finished = b_dict['finish_time']
+                        self.add_event(run_id, self.action_prefix + '_PL_completed', run_finished, case_id,
+                                       user_email, user_name, local_case, '', '', str(self.project_id))
+                        duration = LMPUtils.get_seconds_difference_same_zone(run_created, run_finished)
+                    pl_record = {'id': run_id, 'source': b_dict['source_branch'], 'sha': run_sha,
+                                 'author': user_email, 'created_time': run_created,
+                                 'duration': duration, 'status': b_dict['status'], 'case_id': case_id,
+                                 'project_id': self.project_id}
+                    self.pl_list.append(pl_record)
+                self.log_status(pl_counter, len(definitions))
+            except (TypeError, KeyError):
+                self.logger.error('Error occurred retrieving data for: ' + str(pipeline.id) + ' moving to next.')
+                traceback.print_exc()
+                self.logger.reset_prefix()
+        self.logger.info('number of pipeline related events found: ' + str(self.added_event_count()))
+        return self.event_logs
 
     def get_mrs_events(self):
         """Extract MR events from repo and analyse relations to issues"""
@@ -133,7 +189,6 @@ class AZDConnector(ALMConnector):
                     ext_issue_id = self.find_ext_issue_id(mr_dict['title'] + ' ' + mr_dict['description'])
                 else:
                     ext_issue_id = self.find_ext_issue_id(mr_dict['title'])
-                # TODO - unedited code from here
                 linked = set()
                 mentioned = set()
                 if mr_id in self.mr_issue_link_dict:

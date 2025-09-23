@@ -1,7 +1,7 @@
 import os
-import datetime
+from datetime import datetime
 import pandas as pd
-
+import re
 
 class LMPUtils:
     def __init__(self):
@@ -16,9 +16,9 @@ class LMPUtils:
         return bool_value
 
     @classmethod
-    def rfc2822_to_iso(cls, rfc2822_string: str) -> datetime.datetime:
+    def rfc2822_to_iso(cls, rfc2822_string: str) -> datetime:
         """converts Thu, 26 Sep 2024 09:37:22 +0530 like date to 2024-09-26 09:37:22+05:30"""
-        iso_datetime = datetime.datetime.strptime(rfc2822_string, '%a, %d %b %Y %H:%M:%S %z')
+        iso_datetime = datetime.strptime(rfc2822_string, '%a, %d %b %Y %H:%M:%S %z')
         return iso_datetime
 
     @classmethod
@@ -34,3 +34,13 @@ class LMPUtils:
             # first convert to UTC, this changes times shown if in a different timezone
             converted_series = pd.to_datetime(series, format='ISO8601', utc=True).dt.tz_localize(None)
         return converted_series
+
+    @classmethod
+    def get_seconds_difference_same_zone(cls, start, end):
+        """
+        Calculates the difference in seconds between two ISO 8601 strings,
+        assuming they share the same timezone.
+        """
+        dt1 = datetime.fromisoformat(start)
+        dt2 = datetime.fromisoformat(end)
+        return int((dt2 - dt1).total_seconds())

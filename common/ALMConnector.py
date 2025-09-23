@@ -26,6 +26,7 @@ class ALMConnector(DevOpsConnector):
         self.commit_case_id = {}
         self.mr_list = []
         self.commit_list = []
+        self.pl_list = []
 
     def analyse_commit_events(self) -> list[dict]:
         """Analyses commit events already read from various sources and admits them as events"""
@@ -58,6 +59,17 @@ class ALMConnector(DevOpsConnector):
         if prefix_type in self.case_type_prefixes:
             prefix = self.case_type_prefixes[prefix_type]
         return prefix + '-' + str(self.project_id) + '-' + str(value)
+
+    def find_case_id_for_pl(self, pl_sha: str, pl_id) -> str:
+        """Get the case id for a given pipeline.
+        Provides issue related id if links are found, else provides local scope"""
+        if pl_sha in self.commit_case_id:
+            case_id = self.commit_case_id[pl_sha]
+        else:
+            # TODO: if this hits frequently we may have to implement specific commit pull here
+            self.logger.warn('did not find a relation to a commit for pipeline: ' + str(pl_id))
+            case_id = self.generate_case_id(pl_id, 'pipeline')
+        return case_id
 
     def find_case_id_for_commit(self, commit_sha: str) -> tuple[str, str, str]:
         """ Get case id for a commit event. Gives case_id, link_type, mr_iid as tuple"""
