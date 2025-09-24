@@ -17,6 +17,7 @@
                   "pipeline": "GLPL",
                   "commit": "GLC",
                   "branch": "GLRF",
+                  "release": "GLR",
                   "action_prefix": "gl"
     }
   },
@@ -29,6 +30,7 @@
                   "pipeline": "AZDPL",
                   "commit": "AZDC",
                   "branch": "AZDRF",
+                  "release": "AZDR",
                   "action_prefix": "azd"
     }
   }

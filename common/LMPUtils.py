@@ -1,12 +1,12 @@
 import os
 from datetime import datetime
 import pandas as pd
-import re
+
 
 class LMPUtils:
     def __init__(self):
         # nothing much to do here still
-        print('[INFO] loaded SMDUtils')
+        print('[INFO] loaded LMPUtils')
 
     @classmethod
     def env_bool(cls, env_bool_str: str):
@@ -41,6 +41,6 @@ class LMPUtils:
         Calculates the difference in seconds between two ISO 8601 strings,
         assuming they share the same timezone.
         """
-        dt1 = datetime.fromisoformat(start)
-        dt2 = datetime.fromisoformat(end)
+        dt1 = datetime.fromisoformat(str(start))
+        dt2 = datetime.fromisoformat(str(end))
         return int((dt2 - dt1).total_seconds())

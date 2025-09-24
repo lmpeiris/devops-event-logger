@@ -19,10 +19,14 @@ class AZDConnector(ALMConnector):
         self.logger.info('Running test auth to: ' + base_url)
         credentials = BasicAuthentication('', pvt_token)
         connection = Connection(base_url=base_url, creds=credentials)
+
+        # create various connection clients needed for pulling information
         self.core = connection.clients.get_core_client()
         self.git = connection.clients.get_git_client()
         self.wit = connection.clients.get_work_item_tracking_client()
         self.build = connection.clients.get_build_client()
+        self.release = connection.clients.get_release_client()
+
         self.project = self.core.get_project(project_id=project_name)
         project_id = self.project.id
         self.project_name = project_name
@@ -32,8 +36,64 @@ class AZDConnector(ALMConnector):
         # this is shortened project id, overides superclass
         self.project_id = project_id[0:7]
 
+    def get_release_events(self):
+        # Get all release definitions in the project
+        # Since pipelines and releases are similar mostly similar logic is being used
+        self.logger.info('scanning releases in project_id: ' + str(self.project_name))
+        definitions = self.release.get_release_definitions(project=self.project_name)
+        pl_counter = 0
+        for pipeline in definitions:
+            pl_counter += 1
+            try:
+                pl_dict = pipeline.as_dict()
+                pl_id = str(pl_dict['id'])
+                local_case = self.generate_case_id(pl_id, 'release')
+                pl_created = pl_dict['created_on']
+                user_email = pl_dict['created_by']['unique_name']
+                user_name = pl_dict['created_by']['display_name']
+                self.logger.set_arg_only(local_case)
+                # case id is local id since pl definition is not dependent on commit
+                self.add_event(pl_id, self.action_prefix + '_REL_created', pl_created, local_case, user_email,
+                               user_name, local_case, pl_dict['name'], '', str(self.project_id))
+                # can run this without definition id scope to reduce number of api calls
+                releases = self.release.get_releases(project=self.project_name, definition_id=pipeline.id)
+                for run in releases:
+                    b_dict = run.as_dict()
+                    # release is unique for a project
+                    run_id = str(b_dict['id'])
+                    run_created = b_dict['created_on']
+                    user_email = b_dict['created_by']['unique_name']
+                    user_name = b_dict['created_by']['display_name']
+                    release = self.release.get_release(project=self.project_name, release_id=b_dict['id'])
+                    release_sha = ''
+                    release_branch = ''
+                    # TODO: get_release also provides stage data including when all stages completed
+                    for artifact in release.artifacts:
+                        if artifact.type == 'Git' and artifact.is_primary:
+                            artifact_dict = artifact.as_dict()
+                            release_sha = artifact_dict['definition_reference']['version']['id']
+                            release_branch = artifact_dict['definition_reference']['branch']['name']
+                    local_case = self.generate_case_id(pl_id, 'release')
+                    case_id = self.find_case_id_for_pl(release_sha, run_id, True)
+                    # run queued event
+                    self.add_event(run_id, self.action_prefix + '_REL_started', run_created, case_id, user_email,
+                                   user_name, local_case, pl_dict['name'], b_dict['name'], str(self.project_id))
+                    pl_record = {'id': run_id, 'source': release_branch, 'sha': release_sha,
+                                 'author': user_email, 'created_time': run_created, 'definition': pl_dict['name'],
+                                 'trigger': b_dict['reason'], 'status': b_dict['status'], 'case_id': case_id,
+                                 'project_id': self.project_id}
+                    self.pl_list.append(pl_record)
+                self.log_status(pl_counter, len(definitions))
+            except (TypeError, KeyError):
+                self.logger.error('Error occurred retrieving data for: ' + str(pipeline.id) + ' moving to next.')
+                traceback.print_exc()
+            self.logger.reset_prefix()
+        self.logger.info('number of pipeline related events found: ' + str(self.added_event_count()))
+        return self.event_logs
+
     def get_pipeline_events(self):
         # Get all pipeline definitions in the project
+        self.logger.info('scanning pipelines in project_id: ' + str(self.project_name))
         definitions = self.build.get_definitions(project=self.project_name)
         pl_counter = 0
         for pipeline in definitions:
@@ -54,8 +114,8 @@ class AZDConnector(ALMConnector):
                 builds = self.build.get_builds(project=self.project_name, definitions=[pipeline.id])
                 for run in builds:
                     b_dict = run.as_dict()
-                    # run id should also include definition id
-                    run_id = str(pl_id) + '-' + str(b_dict['id'])
+                    # run id is unique for a project
+                    run_id = str(b_dict['id'])
                     run_created = b_dict['start_time']
                     user_email = b_dict['requested_for']['unique_name']
                     user_name = b_dict['requested_for']['display_name']
@@ -82,7 +142,7 @@ class AZDConnector(ALMConnector):
             except (TypeError, KeyError):
                 self.logger.error('Error occurred retrieving data for: ' + str(pipeline.id) + ' moving to next.')
                 traceback.print_exc()
-                self.logger.reset_prefix()
+            self.logger.reset_prefix()
         self.logger.info('number of pipeline related events found: ' + str(self.added_event_count()))
         return self.event_logs
 

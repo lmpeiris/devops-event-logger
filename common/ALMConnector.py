@@ -60,15 +60,16 @@ class ALMConnector(DevOpsConnector):
             prefix = self.case_type_prefixes[prefix_type]
         return prefix + '-' + str(self.project_id) + '-' + str(value)
 
-    def find_case_id_for_pl(self, pl_sha: str, pl_id) -> str:
+    def find_case_id_for_pl(self, pl_sha: str, pl_id, release: bool = False) -> str:
         """Get the case id for a given pipeline.
         Provides issue related id if links are found, else provides local scope"""
         if pl_sha in self.commit_case_id:
             case_id = self.commit_case_id[pl_sha]
         else:
             # TODO: if this hits frequently we may have to implement specific commit pull here
-            self.logger.warn('did not find a relation to a commit for pipeline: ' + str(pl_id))
-            case_id = self.generate_case_id(pl_id, 'pipeline')
+            prefix_type = 'release' if release else 'pipeline'
+            self.logger.warn('did not find a relation to a commit for ' + prefix_type + ': ' + str(pl_id))
+            case_id = self.generate_case_id(pl_id, prefix_type)
         return case_id
 
     def find_case_id_for_commit(self, commit_sha: str) -> tuple[str, str, str]:
