@@ -36,6 +36,24 @@ class AZDConnector(ALMConnector):
         # this is shortened project id, overides superclass
         self.project_id = project_id[0:7]
 
+    def get_release_completed_time(self, environments: list):
+        # this assumes the last job finish time as the completed time of the release
+        latest_end_time = None
+        for environment in environments:
+            for deployment in environment.deploy_steps:
+                for release_deploy_phase in deployment.release_deploy_phases:
+                    for deployment_job in release_deploy_phase.deployment_jobs:
+                        # Check if the stage has a completion timestamp
+                        if deployment_job.job.finish_time:
+                            # If this is the first one we've found, set it as the latest
+                            if latest_end_time is None:
+                                # environment.deploy_steps[].release_deploy_phases[].deployment_jobs[].job.finish_time
+                                latest_end_time = deployment_job.job.finish_time
+                            # If this stage finished after the current latest, update it
+                            elif deployment_job.job.finish_time > latest_end_time:
+                                latest_end_time = deployment_job.job.finish_time
+        return latest_end_time
+
     def get_release_events(self):
         # Get all release definitions in the project
         # Since pipelines and releases are similar mostly similar logic is being used
@@ -65,6 +83,13 @@ class AZDConnector(ALMConnector):
                     user_email = b_dict['created_by']['unique_name']
                     user_name = b_dict['created_by']['display_name']
                     release = self.release.get_release(project=self.project_name, release_id=b_dict['id'])
+                    # Iterate through all stages (environments) of the release
+                    latest_end_time = self.get_release_completed_time(release.environments)
+                    if latest_end_time is not None:
+                        self.logger.debug('Release completed at: ' + str(latest_end_time))
+                        # add event assuming same person completes the release
+                        self.add_event(pl_id, self.action_prefix + '_REL_completed', latest_end_time, local_case,
+                                       user_email, user_name, local_case, pl_dict['name'], '', str(self.project_id))
                     release_sha = ''
                     release_branch = ''
                     # TODO: get_release also provides stage data including when all stages completed
