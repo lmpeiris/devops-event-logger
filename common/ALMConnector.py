@@ -60,7 +60,7 @@ class ALMConnector(DevOpsConnector):
             prefix = self.case_type_prefixes[prefix_type]
         return prefix + '-' + str(self.project_id) + '-' + str(value)
 
-    def find_case_id_for_pl(self, pl_sha: str, pl_id, release: bool = False) -> str:
+    def find_case_id_for_pl(self, pl_sha: str, pl_id: int, release: bool = False) -> str:
         """Get the case id for a given pipeline.
         Provides issue related id if links are found, else provides local scope"""
         if pl_sha in self.commit_case_id:
@@ -97,7 +97,7 @@ class ALMConnector(DevOpsConnector):
             self.logger.warn('did not find a relation to an MR for commit: ' + str(commit_sha))
         return case_id, link_type, str(mr_iid)
 
-    def find_case_id_for_mr(self, mr_str: str) -> tuple[str, str]:
+    def find_case_id_for_mr(self, mr_str: int) -> tuple[str, str]:
         """Get the case id for a given MR. Returns case_id, link_type as tuple"""
         linked = self.mr_issue_link_dict
         mentioned = self.mr_issue_mention_dict
@@ -107,11 +107,11 @@ class ALMConnector(DevOpsConnector):
             link_type = 'mr_link'
         elif (mr_str in mentioned) and len(mentioned[mr_str]) == 1:
             issue_iid = next(iter(mentioned[mr_str]))
-            self.logger.warn('linking MR to issue using mentions: ' + mr_str)
+            self.logger.warn('linking MR to issue using mentions: ' + str(mr_str))
             case_id = self.generate_case_id(issue_iid, 'issue')
             link_type = 'mr_mention'
         else:
-            self.logger.warn('no relation found to an issue for MR : ' + mr_str)
+            self.logger.warn('no relation found to an issue for MR : ' + str(mr_str))
             case_id = self.generate_case_id(mr_str, 'mr')
             link_type = 'undefined'
         return case_id, link_type

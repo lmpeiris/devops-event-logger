@@ -35,6 +35,7 @@ class AZDConnector(ALMConnector):
         self.logger.info(' Project id is: ' + project_id)
         # this is shortened project id, overides superclass
         self.project_id = project_id[0:7]
+        # TODO: branch creation events can only be retrived by scanning all commits, which is too slow, find other way
 
     def get_release_completed_time(self, environments: list):
         # this assumes the last job finish time as the completed time of the release
@@ -55,6 +56,7 @@ class AZDConnector(ALMConnector):
         return latest_end_time
 
     def get_release_events(self):
+        return_list = []
         # Get all release definitions in the project
         # Since pipelines and releases are similar mostly similar logic is being used
         self.logger.info('scanning releases in project_id: ' + str(self.project_name))
@@ -73,10 +75,11 @@ class AZDConnector(ALMConnector):
                 # case id is local id since pl definition is not dependent on commit
                 self.add_event(pl_id, self.action_prefix + '_REL_created', pl_created, local_case, user_email,
                                user_name, local_case, pl_dict['name'], '', str(self.project_id))
-                # can run this without definition id scope to reduce number of api calls
+                # can run this without definition id scope to reduce number of api calls, if needed
                 releases = self.release.get_releases(project=self.project_name, definition_id=pipeline.id)
                 for run in releases:
                     b_dict = run.as_dict()
+                    return_list.append(b_dict)
                     # release is unique for a project
                     run_id = str(b_dict['id'])
                     run_created = b_dict['created_on']
@@ -90,9 +93,9 @@ class AZDConnector(ALMConnector):
                         # add event assuming same person completes the release
                         self.add_event(pl_id, self.action_prefix + '_REL_completed', latest_end_time, local_case,
                                        user_email, user_name, local_case, pl_dict['name'], '', str(self.project_id))
+                    # azure devops exposes the source branch of a pipeline as an artifact
                     release_sha = ''
                     release_branch = ''
-                    # TODO: get_release also provides stage data including when all stages completed
                     for artifact in release.artifacts:
                         if artifact.type == 'Git' and artifact.is_primary:
                             artifact_dict = artifact.as_dict()
@@ -100,7 +103,7 @@ class AZDConnector(ALMConnector):
                             release_branch = artifact_dict['definition_reference']['branch']['name']
                     local_case = self.generate_case_id(pl_id, 'release')
                     case_id = self.find_case_id_for_pl(release_sha, run_id, True)
-                    # run queued event
+                    # event for a run being queued, we consider it 'pipeline' or 'release' to match with other ALM
                     self.add_event(run_id, self.action_prefix + '_REL_started', run_created, case_id, user_email,
                                    user_name, local_case, pl_dict['name'], b_dict['name'], str(self.project_id))
                     pl_record = {'id': run_id, 'source': release_branch, 'sha': release_sha,
@@ -114,9 +117,10 @@ class AZDConnector(ALMConnector):
                 traceback.print_exc()
             self.logger.reset_prefix()
         self.logger.info('number of pipeline related events found: ' + str(self.added_event_count()))
-        return self.event_logs
+        return return_list
 
     def get_pipeline_events(self):
+        return_list = []
         # Get all pipeline definitions in the project
         self.logger.info('scanning pipelines in project_id: ' + str(self.project_name))
         definitions = self.build.get_definitions(project=self.project_name)
@@ -139,6 +143,7 @@ class AZDConnector(ALMConnector):
                 builds = self.build.get_builds(project=self.project_name, definitions=[pipeline.id])
                 for run in builds:
                     b_dict = run.as_dict()
+                    return_list.append(b_dict)
                     # run id is unique for a project
                     run_id = str(b_dict['id'])
                     run_created = b_dict['start_time']
@@ -147,7 +152,7 @@ class AZDConnector(ALMConnector):
                     run_sha = b_dict['source_version']
                     local_case = self.generate_case_id(pl_id, 'pipeline')
                     # commit ids map to the build, not the definition
-                    case_id = self.find_case_id_for_pl(run_sha, run_id)
+                    case_id = self.find_case_id_for_pl(run_sha, int(run_id))
                     # run queued event
                     self.add_event(run_id, self.action_prefix + '_PL_started', run_created, case_id, user_email,
                                    user_name, local_case, '', '', str(self.project_id))
@@ -169,10 +174,11 @@ class AZDConnector(ALMConnector):
                 traceback.print_exc()
             self.logger.reset_prefix()
         self.logger.info('number of pipeline related events found: ' + str(self.added_event_count()))
-        return self.event_logs
+        return return_list
 
-    def get_mrs_events(self):
+    def get_mrs_events(self) -> list[dict]:
         """Extract MR events from repo and analyse relations to issues"""
+        return_list = []
         self.logger.info('scanning MRs in project_id: ' + str(self.project_name))
         # TODO: link status should be available in issue itself when linked via UI
         # Create a search criteria object to get ALL pull requests (active, completed, abandoned)
@@ -185,15 +191,16 @@ class AZDConnector(ALMConnector):
         for mr in merge_requests:
             mr_counter += 1
             mr_dict = mr.as_dict()
+            return_list.append(mr_dict)
             mr_id = str(mr_dict['pull_request_id'])
             repo_id = mr_dict['repository']['id']
-            # MR id is globally unique within organization
+            # MR id is globally unique within azure-devops organization
             self.logger.debug('Checking MR: ' + mr_id + ' on repo: ' + repo_id)
             try:
                 local_case = self.generate_case_id(mr_id, 'mr')
                 self.logger.set_arg_only(local_case)
                 self.logger.debug('reading data for MR')
-                case_id, link_type = self.find_case_id_for_mr(mr_id)
+                case_id, link_type = self.find_case_id_for_mr(int(mr_id))
                 self.mr_case_id[mr_id] = case_id
                 # NOTE: if using as mr.creation_date via library method, it would return a datetime, but we expect str
                 #       no issues for pandas in UTC but some functions fail
@@ -282,7 +289,8 @@ class AZDConnector(ALMConnector):
                     mentioned = self.mr_issue_mention_dict[mr_id]
                 # add entry to MR dict
                 mr_dict = {'id': mr_id, 'title': mr.title, 'author_id': author_email,
-                           'created_time': mr_dict['creation_date'], 'state': mr.status, 'source_branch': mr.source_ref_name,
+                           'created_time': mr_dict['creation_date'], 'state': mr.status,
+                           'source_branch': mr.source_ref_name,
                            'target_branch': mr.target_ref_name, 'project_id': self.project_name,
                            'ext_issue_id': ext_issue_id, 'linked_issues': linked, 'mentioned_issues': mentioned,
                            'case_id': case_id, 'link_type': link_type}
@@ -293,11 +301,14 @@ class AZDConnector(ALMConnector):
                 traceback.print_exc()
             self.logger.reset_prefix()
         self.logger.info('number of MR related events found: ' + str(self.added_event_count()))
+        return return_list
 
-    def get_issues_events(self):
+    def get_issues_events(self) -> list[dict]:
+        return_list = []
         self.logger.info('scanning issues in project_id: ' + str(self.project_name))
         # --initialising values---
         mention_regex = re.compile('mentioned work item #\\d+')
+        mr_mention_regex = re.compile(r'pullrequest/\d+')
         # WIQL supports SQL like syntax
         # we will be getting work item ids first in to a list
         wiql_query = Wiql(query="SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = \'"
@@ -306,7 +317,7 @@ class AZDConnector(ALMConnector):
         work_item_ids = [item.id for item in query_result.work_items]
         if len(work_item_ids) == 0:
             self.logger.info('No work items found for project. skipping')
-            return
+            return []
         # And then pull data for all ids at once using single api call
         work_items_batch = self.wit.get_work_items(ids=work_item_ids, project=self.project_name, expand='all')
         self.logger.info('number of issues found for project: ' + str(len(work_items_batch)))
@@ -314,9 +325,11 @@ class AZDConnector(ALMConnector):
         for item in work_items_batch:
             # work items are considered as issues from now on
             issue_counter += 1
+            linked_mrs = set()
             mentioned_mrs = set()
-            mentioned_issues = set()
+            linked_issues = set()
             item_dict = item.as_dict()
+            return_list.append(item_dict)
             fields = item_dict['fields']
             issue_id = fields['System.Id']
             case_id = self.generate_case_id(issue_id, 'issue')
@@ -338,38 +351,56 @@ class AZDConnector(ALMConnector):
                 # Loop through revisions to find the differences in the 'System.State' field
                 # TODO: see whether this captures assigning to user
                 for i in range(1, len(revisions)):
-                    current_rev = revisions[i]
+                    rev = revisions[i]
                     previous_rev = revisions[i - 1]
-                    # Direct comparison of the 'System.State' field
-                    current_state = current_rev.fields.get('System.State')
+                    # get comment events if there are any
+                    if 'System.History' in rev.fields:
+                        self.add_event(case_id + '-' + str(rev.rev),
+                                       self.action_prefix + '_issue_commented',
+                                       rev.fields['System.ChangedDate'], case_id,
+                                       rev.fields['System.ChangedBy']['uniqueName'],
+                                       rev.fields['System.ChangedBy']['displayName'],
+                                       case_id, '', '', str(self.project_id))
+                        mr_mention_match = re.search(mr_mention_regex, rev.fields['System.History'])
+                        if mr_mention_match is not None:
+                            # get MR iid and add as int
+                            mentioned_mr = int(mr_mention_match.group(0).split('/')[-1])
+                            # add to set
+                            mentioned_mrs.add(mentioned_mr)
+                            self.add_link(self.mr_issue_mention_dict, mentioned_mr, issue_id)
+                    # Direct comparison of the 'System.State' field to find state changes
+                    current_state = rev.fields.get('System.State')
                     previous_state = previous_rev.fields.get('System.State')
                     if current_state != previous_state:
-                        self.add_event(case_id + '-' + str(current_rev.rev),
+                        self.add_event(case_id + '-' + str(rev.rev),
                                        self.action_prefix + '_issue_' + current_state,
-                                       current_rev.fields['System.ChangedDate'], case_id,
-                                       current_rev.fields['System.ChangedBy']['uniqueName'],
-                                       current_rev.fields['System.ChangedBy']['displayName'],
+                                       rev.fields['System.ChangedDate'], case_id,
+                                       rev.fields['System.ChangedBy']['uniqueName'],
+                                       rev.fields['System.ChangedBy']['displayName'],
                                        case_id, '', '', str(self.project_id))
-                # check relations to other entities
+                # check relations to other entities (links and parents)
                 for x in item.relations:
                     relation = x.as_dict()
                     match relation['attributes']['name']:
                         case 'Parent':
+                            # get parent issue
                             url = relation['url']
                             parent_id = url.split('/')[-1]
-                            # TODO: is this sub task?
                         case 'Related':
+                            # Related finds the linked entities like other issues, and PRs
                             if re.search(mention_regex, relation['attributes']['comment']) is not None:
-                                # TODO: add PR mention criteria
+                                # TODO: PR relation gives an alien id which cannot be resolved
+                                # MR links hence not resolved at this point. Linked issues not used for any resolving
                                 # get MR iid and add as int
-                                mentioned_issue = int(relation['url'].split('/')[-1])
+                                linked_issue = int(relation['url'].split('/')[-1])
                                 # add to set
-                                mentioned_issues.add(mentioned_issue)
-                                self.add_link(self.issue_issue_mention_dict, issue_id, mentioned_issue)
+                                linked_issues.add(linked_issue)
+                                self.add_link(self.issue_issue_mention_dict, issue_id, linked_issue)
 
                 issue_dict = {'id': fields['System.Id'], 'title': fields['System.Description'],
                               'author_id': author_email, 'created_time': created_time, 'type': issue_type,
-                              'updated_time': updated_time, 'state': state, 'project_id': self.project_name}
+                              'updated_time': updated_time, 'state': state, 'project_id': self.project_name,
+                              'mentioned_mrs': mentioned_mrs}
                 self.issue_list.append(issue_dict)
                 self.log_status(issue_counter, len(work_items_batch))
             except (TypeError, KeyError):
@@ -377,3 +408,4 @@ class AZDConnector(ALMConnector):
                 traceback.print_exc()
             self.logger.reset_prefix()
         self.logger.info('number of issue related events found: ' + str(self.added_event_count()))
+        return return_list
