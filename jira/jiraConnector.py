@@ -27,12 +27,12 @@ class JiraConnector(DevOpsConnector):
         # regex for finding other jira issue mentions
         self.jira_issue_regex = re.compile(jira_url + '/browse/[A-Z]{1,9}-\\d+')
 
-    def find_issue_id_mentions(self, input_dict: dict, url_split_number: int = 4) -> list[str]:
+    def find_issue_id_mentions(self, input_dict: dict) -> list[str]:
         """Gives list of issue ids found in dict by converting whole thing to json"""
         json_txt = json.dumps(input_dict)
         regex_matches = []
         for match in self.jira_issue_regex.findall(json_txt):
-            regex_matches.append(match.split('/')[url_split_number])
+            regex_matches.append(match.split('/')[-1])
         return regex_matches
 
     def request(self, url_suffix, method: str = "GET", payload: dict = None, params: dict = None) -> dict:

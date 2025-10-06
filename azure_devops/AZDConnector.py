@@ -36,6 +36,8 @@ class AZDConnector(ALMConnector):
         # this is shortened project id, overides superclass
         self.project_id = project_id[0:7]
         # TODO: branch creation events can only be retrived by scanning all commits, which is too slow, find other way
+        # limit to use if production run is false
+        self.nonprod_limit = 10
 
     def get_release_completed_time(self, environments: list):
         # this assumes the last job finish time as the completed time of the release
@@ -55,7 +57,7 @@ class AZDConnector(ALMConnector):
                                 latest_end_time = deployment_job.job.finish_time
         return latest_end_time
 
-    def get_release_events(self):
+    def get_release_events(self, prod_run: bool = False):
         return_list = []
         # Get all release definitions in the project
         # Since pipelines and releases are similar mostly similar logic is being used
@@ -77,6 +79,8 @@ class AZDConnector(ALMConnector):
                                user_name, local_case, pl_dict['name'], '', str(self.project_id))
                 # can run this without definition id scope to reduce number of api calls, if needed
                 releases = self.release.get_releases(project=self.project_name, definition_id=pipeline.id)
+                if not prod_run:
+                    releases = releases[0:self.nonprod_limit]
                 for run in releases:
                     b_dict = run.as_dict()
                     return_list.append(b_dict)
@@ -102,7 +106,7 @@ class AZDConnector(ALMConnector):
                             release_sha = artifact_dict['definition_reference']['version']['id']
                             release_branch = artifact_dict['definition_reference']['branch']['name']
                     local_case = self.generate_case_id(pl_id, 'release')
-                    case_id = self.find_case_id_for_pl(release_sha, run_id, True)
+                    case_id = self.find_case_id_for_pl(release_sha, int(run_id), True)
                     # event for a run being queued, we consider it 'pipeline' or 'release' to match with other ALM
                     self.add_event(run_id, self.action_prefix + '_REL_started', run_created, case_id, user_email,
                                    user_name, local_case, pl_dict['name'], b_dict['name'], str(self.project_id))
@@ -110,7 +114,8 @@ class AZDConnector(ALMConnector):
                                  'author': user_email, 'created_time': run_created, 'definition': pl_dict['name'],
                                  'trigger': b_dict['reason'], 'status': b_dict['status'], 'case_id': case_id,
                                  'project_id': self.project_id}
-                    self.pl_list.append(pl_record)
+                    # release have a different format, hence exposed as a separate entity
+                    self.rel_list.append(pl_record)
                 self.log_status(pl_counter, len(definitions))
             except (TypeError, KeyError):
                 self.logger.error('Error occurred retrieving data for: ' + str(pipeline.id) + ' moving to next.')
@@ -119,7 +124,7 @@ class AZDConnector(ALMConnector):
         self.logger.info('number of pipeline related events found: ' + str(self.added_event_count()))
         return return_list
 
-    def get_pipeline_events(self):
+    def get_pipeline_events(self, prod_run: bool = False):
         return_list = []
         # Get all pipeline definitions in the project
         self.logger.info('scanning pipelines in project_id: ' + str(self.project_name))
@@ -141,6 +146,8 @@ class AZDConnector(ALMConnector):
                                user_name, local_case, pl_dict['name'], '', str(self.project_id))
                 # Get the top 5 most recent runs for this pipeline definition
                 builds = self.build.get_builds(project=self.project_name, definitions=[pipeline.id])
+                if not prod_run:
+                    builds = builds[0:self.nonprod_limit]
                 for run in builds:
                     b_dict = run.as_dict()
                     return_list.append(b_dict)
@@ -176,7 +183,7 @@ class AZDConnector(ALMConnector):
         self.logger.info('number of pipeline related events found: ' + str(self.added_event_count()))
         return return_list
 
-    def get_mrs_events(self) -> list[dict]:
+    def get_mrs_events(self, prod_run: bool = False) -> list[dict]:
         """Extract MR events from repo and analyse relations to issues"""
         return_list = []
         self.logger.info('scanning MRs in project_id: ' + str(self.project_name))
@@ -188,6 +195,8 @@ class AZDConnector(ALMConnector):
                                                                search_criteria=search_criteria)
         self.logger.info('number of MRs found for project: ' + str(len(merge_requests)))
         mr_counter = 0
+        if not prod_run:
+            merge_requests = merge_requests[0:self.nonprod_limit]
         for mr in merge_requests:
             mr_counter += 1
             mr_dict = mr.as_dict()
@@ -303,7 +312,7 @@ class AZDConnector(ALMConnector):
         self.logger.info('number of MR related events found: ' + str(self.added_event_count()))
         return return_list
 
-    def get_issues_events(self) -> list[dict]:
+    def get_issues_events(self, prod_run: bool = False) -> list[dict]:
         return_list = []
         self.logger.info('scanning issues in project_id: ' + str(self.project_name))
         # --initialising values---
@@ -322,6 +331,8 @@ class AZDConnector(ALMConnector):
         work_items_batch = self.wit.get_work_items(ids=work_item_ids, project=self.project_name, expand='all')
         self.logger.info('number of issues found for project: ' + str(len(work_items_batch)))
         issue_counter = 0
+        if not prod_run:
+            work_items_batch = work_items_batch[0:self.nonprod_limit]
         for item in work_items_batch:
             # work items are considered as issues from now on
             issue_counter += 1
