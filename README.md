@@ -19,11 +19,13 @@ Currently, event logs are only exported as pandas dataframes, in parquet.gz form
 
 - For gitlab PATs, please see this guide https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html#create-a-personal-access-token
 - For jira PATs, please see https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html
+- For azure devops PATs, please see https://learn.microsoft.com/en-us/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate
 - To get gitlab repo ids, check the project settings, or click on the repo icon
 
 ## Tested / supported data sources
 
 | DevOps system | Data sources | Tested Versions |
 | ----------- | ----------- | ----------- |
-| Jira | xml dump, v3 api based custom connector | jira cloud 2026 Aug version|
-| Gitlab | python-gitlab | 16.x.x |
+| Jira | xml dump, v3 api based custom connector | jira cloud 2025 Aug version|
+| Gitlab | python-gitlab v4 | 16.x.x |
+| Azure-devops | azure-devops api v7.1 | azure devops 2025 october version |
