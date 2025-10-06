@@ -22,7 +22,7 @@
     }
   },
   "azure_devops": {
-    "get_all_events_order": ["get_issues_events", "get_branch_events", "get_mrs_events", "get_commit_events", "get_pipeline_events"],
+    "get_all_events_order": ["get_issues_events", "get_mrs_events", "analyse_commit_events", "get_pipeline_events", "get_release_events"],
     "preserve_timezone": false,
     "case_type_prefixes": {
                   "issue": "AZDI",

@@ -27,11 +27,13 @@ class ALMConnector(DevOpsConnector):
         self.mr_list = []
         self.commit_list = []
         self.pl_list = []
+        self.rel_list = []
 
-    def analyse_commit_events(self) -> list[dict]:
+    def analyse_commit_events(self, prod_run: bool = False) -> list[dict]:
         """Analyses commit events already read from various sources and admits them as events"""
         self.logger.info('analysing commit list for project id: ' + str(self.project_id))
         # iterate through the mr commits dict which contains already read commits
+        # hence prod run is just a placeholder and is not implemented
         for commit_sha, commit in self.commit_info.items():
             try:
                 case_id, link_type, mr_iid = self.find_case_id_for_commit(commit_sha)

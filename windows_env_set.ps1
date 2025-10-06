@@ -36,3 +36,21 @@ $env:JIRA_AUTH_EMAIL='abc@xxx'
 $env:JIRA_PRJ_KEY='MS'
 $env:JIRA_START_KEY='5000'
 $env:JIRA_STOP_KEY='5010'
+
+
+##### Azure Devops ##########
+# AZD base url
+$env:AZD_BASE_URL='https://dev.azure.com/xxxxx'
+# personal access token (PAT) created in AZD
+$env:AZD_PRIVATE_TOKEN='xxxxxxxxxxxxx'
+# comma separated project name list
+$env:AZD_PROJECT_NAMES='abcd_project,efgh_project'
+# regex for identifying external ticket id mentions
+$env:AZD_EXTERNAL_ISSUE_REGEX='(ABCD-+[0-9(_)]+)'
+# when enabled, full amount of data will be retrieved via apis
+# false is good for a test run, with only partial data is retrieved
+$env:AZD_PRODUCTION_RUN='True'
+# parquet file suffix to use when saving.
+$env:AZD_PARQUET_SUFFIX='ABCD'
+# file to save user information as json
+$env:AZD_USER_JSON_DUMP='found_users.json'
