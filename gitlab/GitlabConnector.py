@@ -169,14 +169,12 @@ class GitlabConnector(DevOpsConnector):
                 self.logger.debug('jobs found for pipeline: ' + str(len(jobs)))
                 # TODO: better strategy would be to find when the first job of each stage started,
                 #  and have one event per stage
-                job_ids = set()
                 for job in jobs:
                     if job.status in ['started', 'failed', 'success']:
                         # add job event
                         # job started at time could be None - as created jobs may not have run
                         self.add_event(job.id, 'gl_job_started', job.started_at, case_id, job.user['id'],
                                        job.user['name'], local_case, str(job.name), str(job.stage), str(self.project_id))
-                        job_ids.add(job.id)
                 # create pipeline dict
                 if pl.duration is None:
                     duration = 0

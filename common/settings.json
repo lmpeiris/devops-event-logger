@@ -10,6 +10,28 @@
   },
   "gitlab": {
     "get_all_events_order": ["get_issues_events", "get_branch_events", "get_mrs_events", "get_commit_events", "get_pipeline_events"],
-    "preserve_timezone": false
+    "preserve_timezone": false,
+    "case_type_prefixes": {
+                  "issue": "GLI",
+                  "mr": "MR",
+                  "pipeline": "GLPL",
+                  "commit": "GLC",
+                  "branch": "GLRF",
+                  "release": "GLR",
+                  "action_prefix": "gl"
+    }
+  },
+  "azure_devops": {
+    "get_all_events_order": ["get_issues_events", "get_mrs_events", "analyse_commit_events", "get_pipeline_events", "get_release_events"],
+    "preserve_timezone": false,
+    "case_type_prefixes": {
+                  "issue": "AZDI",
+                  "mr": "AZDMR",
+                  "pipeline": "AZDPL",
+                  "commit": "AZDC",
+                  "branch": "AZDRF",
+                  "release": "AZDR",
+                  "action_prefix": "azd"
+    }
   }
 }

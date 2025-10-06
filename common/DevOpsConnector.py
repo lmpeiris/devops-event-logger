@@ -23,8 +23,8 @@ class DevOpsConnector:
         self.event_counter = 0
         # temp event count, calling added_event_count method will reset it
         self.temp_event_count = 0
-        # iso 8601 regex
-        self.iso8601_re = re.compile(r'\d{4}-\d{2}-\d{2}T')
+        # iso 8601 regex, also supporting space instead of T
+        self.iso8601_re = re.compile(r'\d{4}-\d{2}-\d{2}[T ]')
 
     def add_event(self, event_id, action, iso8601_time, case, user, user_ref, local_case, info1: str = '', info2: str = '',
                   ns: str = '', duration: int = 0) -> dict:
@@ -43,6 +43,7 @@ class DevOpsConnector:
             if ns == '':
                 ns = self.namespace
             # check whether time is in iso8601 format, and is a time and not a date
+            # works as long as the object can be converted to iso8601 format string like datetime
             time = str(iso8601_time)
             if not self.iso8601_re.search(time):
                 self.logger.warn(action + ' event rejected as not a valid iso8601 datetime: ' + time)
@@ -117,9 +118,9 @@ class DevOpsConnector:
         latest_id = 0
         latest_time = datetime.datetime.fromisoformat('2000-01-01T00:00:00.000Z')
         for i in input_ids:
-            itime = datetime.datetime.fromisoformat(dt_dict_to_lookup[i])
+            # fromisoformat works for strings only
+            itime = datetime.datetime.fromisoformat(str(dt_dict_to_lookup[i]))
             if itime > latest_time:
                 latest_time = itime
                 latest_id = i
         return latest_id
-
