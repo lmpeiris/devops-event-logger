@@ -6,6 +6,20 @@ Currently, event logs are only exported as pandas dataframes, in parquet.gz form
 
 <img src="images/devops_event_logger.jpg" alt="alt text" width="512" height="512">
 
+## Process Mining?
+
+Usually, you make sure that inside the business process, at each step there are events logged. These can then be 'mined'
+using process mining algorithms to provide process maps. This allows to understand how the actual business process works,
+what are the bottlenecks and process violations in historic or realtime context.
+
+This tool helps you to gather event data from typical devops software, if you did not log events already. Below is a
+sample event log mined using heuristic miner algorithm using python PM4PY and visualised.
+
+<img src="images/process_heuristic_miner.png" alt="alt text" width="512" height="512">
+
+Examples are provided in [process_mining_examples](process_mining_examples) folder
+
+
 ## High level steps
 
 - Create Personal Access Token (PATs) for devops tools desired (please see references below)
