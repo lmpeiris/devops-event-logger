@@ -14,15 +14,24 @@ class ALMConnector(DevOpsConnector):
         # -------------------------------------------
         # -- dicts for fast ref
         # -------------------------------------------
+        # input mr iid, out - issue iid(s) linked
         self.mr_issue_link_dict = {}
+        # input mr iid, out - issue iid(s) mentioned
         self.mr_issue_mention_dict = {}
+        # input - issue / mr id, out - created time
         self.issue_created_dict = {}
+        # input - mr iid, out - case id
         self.mr_case_id = {}
         self.mr_created_dict = {}
+        # input - commit hash, out - mr iid(s) by pre merge commit
         self.commit_mr_pre_merge_dict = {}
+        # input - commit hash, out - mr iid(s) by post merge commit
         self.commit_mr_post_merge_dict = {}
+        # input - commit hash, out - static commit details as dict
         self.commit_info = {}
+        # input - commit hash, out - mr iid(s) by mr's commit list
         self.commit_mr_commits_dict = {}
+        # input - commit hash, out - case id
         self.commit_case_id = {}
         self.mr_list = []
         self.commit_list = []

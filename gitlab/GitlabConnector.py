@@ -2,15 +2,15 @@
 import gitlab
 import re
 import traceback
-from typing import Literal
 import sys
 sys.path.insert(0, '../common')
-from DevOpsConnector import DevOpsConnector
+from ALMConnector import ALMConnector
 
 
-class GitlabConnector(DevOpsConnector):
-    def __init__(self, base_url: str, pvt_token: str, project_id: str, ext_issue_ref_regex: str, api_delay: int = 0):
-        DevOpsConnector.__init__(self, project_id, api_delay)
+class GitlabConnector(ALMConnector):
+    def __init__(self, base_url: str, pvt_token: str, project_id: str, ext_issue_ref_regex: str,
+                 case_type_prefixes: dict, api_delay: int = 0):
+        ALMConnector.__init__(self, project_id, ext_issue_ref_regex,  api_delay, case_type_prefixes)
         self.logger.info('Running test auth to: ' + base_url)
         self.gl = gitlab.Gitlab(base_url, private_token=pvt_token)
         self.gl.auth()
@@ -24,122 +24,16 @@ class GitlabConnector(DevOpsConnector):
         # Please note that some attributes would also come from parent class as well
         # input - issue iid, provides various info
         self.issue_iid_dict = {}
-        # input - issue / mr id, out - created time
-        self.issue_created_dict = {}
-        self.mr_created_dict = {}
         # input issue iid, out - mr iid(s) linked
         self.issue_mr_link_dict = {}
         # input issue iid, out - mr iid(s) mentioned
         self.issue_mr_mention_dict = {}
-        # input mr iid, out - issue iid(s) linked
-        self.mr_issue_link_dict = {}
-        # input mr iid, out - issue iid(s) mentioned
-        self.mr_issue_mention_dict = {}
-        # input - mr iid, out - case id
-        self.mr_case_id = {}
-        # input - commit hash, out - static commit details as dict
-        self.commit_info = {}
-        # input - commit hash, out - mr iid(s) by pre merge commit
-        self.commit_mr_pre_merge_dict = {}
-        # input - commit hash, out - mr iid(s) by post merge commit
-        self.commit_mr_post_merge_dict = {}
-        # input - commit hash, out - mr iid(s) by mr's commit list
-        self.commit_mr_commits_dict = {}
-        # input - commit hash, out - case id
-        self.commit_case_id = {}
         # input - user (gitlab id or email), out - user ref
         self.user_ref = {}
         # input - user email, out - gitlab user id
         self.user_email_map = {}
         # input - branch name, out - case id
         self.branch_case_id = {}
-        # --- lists for entity data dumping
-        self.mr_list = []
-        self.commit_list = []
-        self.pl_list = []
-        self.ext_issue_regex = re.compile(ext_issue_ref_regex)
-
-    def find_case_id_for_mr(self, mr_iid: int) -> tuple[str, str]:
-        """Get the case id for a given MR. Returns case_id, link_type as tuple"""
-        linked = self.mr_issue_link_dict
-        mentioned = self.mr_issue_mention_dict
-        if (mr_iid in linked) and len(linked[mr_iid]) > 0:
-            latest_issue = self.get_max_timed_id(linked[mr_iid], self.issue_created_dict)
-            case_id = self.generate_case_id(latest_issue, 'issue')
-            link_type = 'mr_link'
-        elif (mr_iid in mentioned) and len(mentioned[mr_iid]) == 1:
-            issue_iid = next(iter(mentioned[mr_iid]))
-            self.logger.warn('linking MR to issue using mentions: ' + str(mr_iid))
-            case_id = self.generate_case_id(issue_iid, 'issue')
-            link_type = 'mr_mention'
-        else:
-            self.logger.warn('no relation found to an issue for MR : ' + str(mr_iid))
-            case_id = self.generate_case_id(mr_iid, 'mr')
-            link_type = 'undefined'
-        return case_id, link_type
-
-    def find_case_id_for_pl(self, pl_sha: str, pl_id: int) -> str:
-        """Get the case id for a given pipeline.
-        Provides issue related id if links are found, else provides local scope"""
-        if pl_sha in self.commit_case_id:
-            case_id = self.commit_case_id[pl_sha]
-        else:
-            # TODO: if this hits frequently we may have to implement specific commit pull here
-            self.logger.warn('did not find a relation to a commit for pipeline: ' + str(pl_id))
-            case_id = self.generate_case_id(pl_id, 'pipeline')
-        return case_id
-
-    def find_case_id_for_commit(self, commit_sha: str) -> tuple[str, str, str]:
-        """ Get case id for a commit event. Gives case_id, link_type, mr_iid as tuple"""
-        pre_merge = self.commit_mr_pre_merge_dict
-        post_merge = self.commit_mr_post_merge_dict
-        commit_list = self.commit_mr_commits_dict
-        mr_iid = ''
-        if (commit_sha in pre_merge) and len(pre_merge[commit_sha]) > 0:
-            mr_iid = self.get_max_timed_id(pre_merge[commit_sha], self.mr_created_dict)
-            case_id = self.mr_case_id[mr_iid]
-            link_type = 'pre_merge'
-        elif (commit_sha in post_merge) and len(post_merge[commit_sha]) > 0:
-            mr_iid = self.get_max_timed_id(post_merge[commit_sha], self.mr_created_dict)
-            case_id = self.mr_case_id[mr_iid]
-            link_type = 'post_merge'
-        elif (commit_sha in commit_list) and len(commit_list[commit_sha]) > 0:
-            mr_iid = self.get_max_timed_id(commit_list[commit_sha], self.mr_created_dict)
-            case_id = self.mr_case_id[mr_iid]
-            link_type = 'commit_related'
-        else:
-            # generate case id using first 6 digits of sha
-            case_id = self.generate_case_id(commit_sha[:6], 'commit')
-            link_type = 'undefined'
-            self.logger.warn('did not find a relation to an MR for commit: ' + str(commit_sha))
-        return case_id, link_type, str(mr_iid)
-
-    def find_ext_issue_id(self, input_text: str) -> str:
-        """Find external system issued ticket id using regex"""
-        # we are considering the first match only
-        result = self.ext_issue_regex.search(input_text)
-        if result is None:
-            return ''
-        else:
-            match = result.group(1)
-            self.logger.debug('found reference to external issue id: ' + match)
-            return match
-
-    def generate_case_id(self, value, prefix_type: Literal['issue', 'mr', 'pipeline', 'commit', 'branch']) -> str:
-        """Case id generation logic"""
-        prefix = ''
-        match prefix_type:
-            case 'issue':
-                prefix = 'GLI'
-            case 'mr':
-                prefix = 'MR'
-            case 'pipeline':
-                prefix = 'GLPL'
-            case 'commit':
-                prefix = 'GLC'
-            case 'branch':
-                prefix = 'GLRF'
-        return prefix + '-' + str(self.project_id) + '-' + str(value)
 
     def get_pipeline_events(self, prod_run: bool = False) -> list[dict]:
         """Extract pipeline and job events from the repo"""
@@ -159,10 +53,10 @@ class GitlabConnector(DevOpsConnector):
                 local_case = self.generate_case_id(pl.id, 'pipeline')
                 # TODO: create the PL list
                 # pipeline created event
-                self.add_event(pl.id, 'gl_PL_created',  pl.created_at, case_id, pl.user['id'],
+                self.add_event(pl.id, self.action_prefix + '_PL_created',  pl.created_at, case_id, pl.user['id'],
                                pl.user['name'], local_case, '', '', str(self.project_id))
                 # pipeline completed event - only adds if finished_at is not none
-                self.add_event(pl.id, 'gl_PL_completed', pl.finished_at, case_id, pl.user['id'],
+                self.add_event(pl.id, self.action_prefix + '_PL_completed', pl.finished_at, case_id, pl.user['id'],
                                pl.user['name'], local_case, '', '', str(self.project_id))
                 # get pipeline jobs
                 jobs = pl.jobs.list(get_all=prod_run)
@@ -173,7 +67,7 @@ class GitlabConnector(DevOpsConnector):
                     if job.status in ['started', 'failed', 'success']:
                         # add job event
                         # job started at time could be None - as created jobs may not have run
-                        self.add_event(job.id, 'gl_job_started', job.started_at, case_id, job.user['id'],
+                        self.add_event(job.id, self.action_prefix + '_job_started', job.started_at, case_id, job.user['id'],
                                        job.user['name'], local_case, str(job.name), str(job.stage), str(self.project_id))
                 # create pipeline dict
                 if pl.duration is None:
@@ -210,38 +104,12 @@ class GitlabConnector(DevOpsConnector):
                     author_ref = self.user_email_map[br.commit['author_email']]
                 # add branch create event
                 # note: br commit id is branch hash
-                self.add_event(br.commit['id'], 'gl_branch_created', br.commit['created_at'], case_id,
+                self.add_event(br.commit['id'], self.action_prefix + '_branch_created', br.commit['created_at'], case_id,
                                author_ref, br.commit['author_name'], case_id, br.name, '', str(self.project_id))
             except (TypeError, KeyError):
                 self.logger.error('Error occurred retrieving data for: ' + br.name + ' moving to next.')
                 traceback.print_exc()
         self.logger.info('number of branch events found: ' + str(self.added_event_count()))
-        return self.event_logs
-
-    def get_commit_events(self, prod_run: bool = False) -> list[dict]:
-        """Extract commit events from repo"""
-        project = self.project_object
-        self.logger.info('getting commit list for project id: ' + str(self.project_id))
-        # TODO: pulling all commits from repo again is not needed as almost all captured my MRs usually
-        # iterate through the mr commits dict
-        for commit_sha, commit in self.commit_info.items():
-            try:
-                case_id, link_type, mr_iid = self.find_case_id_for_commit(commit_sha)
-                self.commit_case_id[commit_sha] = case_id
-                local_case = self.generate_case_id(commit_sha[:6], 'commit')
-                self.add_event(commit_sha, 'gl_commit', commit['time'], case_id, commit['user'],
-                               commit['user_ref'], local_case, commit['info1'], '', str(self.project_id))
-                commit_dict = {'id': commit_sha, 'author': commit['user'], 'created_time': commit['time'],
-                               'case_id': case_id, 'project_id': self.project_id,
-                               'pre_merge': self.empty_set_or_value(self.commit_mr_pre_merge_dict, commit_sha),
-                               'post_merge': self.empty_set_or_value(self.commit_mr_post_merge_dict, commit_sha),
-                               'commit_list': self.empty_set_or_value(self.commit_mr_commits_dict, commit_sha),
-                               'chosen_mr': mr_iid}
-                self.commit_list.append(commit_dict)
-            except (TypeError, KeyError):
-                self.logger.error('Error occurred retrieving data for: ' + str(commit_sha) + ' moving to next.')
-                traceback.print_exc()
-        self.logger.info('number of commit events found: ' + str(self.added_event_count()))
         return self.event_logs
 
     def get_mrs_events(self, prod_run: bool = False) -> list[dict]:
@@ -262,17 +130,17 @@ class GitlabConnector(DevOpsConnector):
                 self.mr_case_id[mr.iid] = case_id
                 self.mr_created_dict[mr.iid] = mr.created_at
                 # create event log for create MR event
-                self.add_event(mr.id, 'gl_MR_created', mr.created_at, case_id, mr.author['id'],
+                self.add_event(mr.id, self.action_prefix + '_MR_created', mr.created_at, case_id, mr.author['id'],
                                mr.author['name'], local_case, '', '', str(self.project_id))
                 if mr.merge_user is not None:
                     # adding merged event
                     # it was observed that sometimes merge user id not defined even if merged_at is defined
-                    self.add_event(mr.id, 'gl_MR_merged', mr.merged_at,
+                    self.add_event(mr.id, self.action_prefix + '_MR_merged', mr.merged_at,
                                    case_id, mr.merge_user['id'], mr.merge_user['name'], local_case, '', '',
                                    str(self.project_id))
                 # add closing event
                 if mr.closed_at is not None:
-                    self.add_event(mr.id, 'gl_MR_closed', mr.closed_at,
+                    self.add_event(mr.id, self.action_prefix + '_MR_closed', mr.closed_at,
                                    case_id, mr.closed_by['id'], mr.closed_by['name'], local_case, '', '',
                                    str(self.project_id))
                 # adding pre-merge commit
@@ -359,7 +227,7 @@ class GitlabConnector(DevOpsConnector):
                     # check whether there's assigned note
                     if re.search(assigned_regex, note.body) is not None:
                         # add assigned event
-                        self.add_event(note.id, 'gl_issue_assigned', note.created_at, case_id,
+                        self.add_event(note.id, self.action_prefix + '_issue_assigned', note.created_at, case_id,
                                        note.author['id'], note.author['name'], case_id, note.body, '',
                                        str(self.project_id))
                     # check whether there's branch creation
@@ -387,14 +255,14 @@ class GitlabConnector(DevOpsConnector):
                 self.issue_mr_link_dict[issue.iid] = linked_mrs
                 self.issue_mr_mention_dict[issue.iid] = mentioned_mrs
                 # create event log for create issue event
-                self.add_event(issue.id, 'gl_issue_created',
+                self.add_event(issue.id, self.action_prefix + '_issue_created',
                                issue.created_at, case_id, issue.author['id'], issue.author['name'], case_id,
                                issue.issue_type, '', str(self.project_id))
                 # closed event
                 if issue.closed_at is not None:
                     # issue.closed_by is a method which does something else
                     # see https://github.com/python-gitlab/python-gitlab/issues/2590
-                    self.add_event(issue.id, 'gl_issue_closed', issue.closed_at, case_id,
+                    self.add_event(issue.id, self.action_prefix + '_issue_closed', issue.closed_at, case_id,
                                    issue.asdict()['closed_by']['id'], issue.asdict()['closed_by']['name'], case_id,
                                    '', '', str(self.project_id))
                 # Try to find an external issue id. description can be null

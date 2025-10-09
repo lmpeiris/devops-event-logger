@@ -62,7 +62,8 @@ if __name__ == '__main__':
     if gitlab_id_email_csv != 'None':
         load_user_email_map(gitlab_id_email_csv, user_email_map)
     for project_id in gitlab_project_id_list:
-        glc = GitlabConnector(gitlab_base_url, gitlab_private_token, project_id, external_issue_ref_regex)
+        glc = GitlabConnector(gitlab_base_url, gitlab_private_token, project_id, external_issue_ref_regex,
+                              settings['case_type_prefixes'])
         glc.user_email_map = user_email_map
         events = glc.get_all_events(settings['get_all_events_order'], production_run)
         event_logs.extend(events)
